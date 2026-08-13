@@ -103,15 +103,28 @@ export function normalizeSettings(raw: unknown): Settings {
         typeof (item as Shortcut).url === 'string'
       ) {
         const s = item as Shortcut;
+        let safeUrl: string;
+        try {
+          const rawUrl = s.url.trim();
+          const candidate = /^https?:\/\//i.test(rawUrl)
+            ? rawUrl
+            : `https://${rawUrl.replace(/^\/\//, '')}`;
+          const parsed = new URL(candidate);
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') continue;
+          safeUrl = parsed.href;
+        } catch {
+          continue;
+        }
         list.push({
           id: s.id.slice(0, 40),
           title: typeof s.title === 'string' && s.title ? s.title.slice(0, 24) : s.id,
-          url: /^(https?:)?\/\//.test(s.url) ? s.url : `https://${s.url}`,
+          url: safeUrl,
           enabled: !!s.enabled,
         });
       }
     }
-    if (list.length) base.shortcuts = list.slice(0, 24);
+    // An empty list is valid (the user may intentionally remove every tile).
+    base.shortcuts = list.slice(0, 24);
   }
 
   return base;

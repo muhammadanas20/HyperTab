@@ -38,6 +38,8 @@ const ICONS: Record<string, string> = {
 export class WeatherWidget {
   private settings: Settings;
   private timer = 0;
+  private lastData: WeatherData | null = null;
+  private requestId = 0;
 
   constructor(settings: Settings) {
     this.settings = settings;
@@ -47,8 +49,17 @@ export class WeatherWidget {
   }
 
   updateSettings(s: Settings): void {
+    const was = this.settings;
     this.settings = s;
-    void this.refresh(true);
+    if (!s.weatherEnabled) {
+      this.requestId++;
+      this.hide();
+      return;
+    }
+    if (was.weatherUnit !== s.weatherUnit && this.lastData) this.show(this.lastData);
+    if (!was.weatherEnabled || was.weatherCity.trim() !== s.weatherCity.trim()) {
+      void this.refresh();
+    }
   }
 
   private hide(): void {
@@ -56,6 +67,7 @@ export class WeatherWidget {
   }
 
   private show(data: WeatherData): void {
+    this.lastData = data;
     const root = $('#weather');
     root.removeAttribute('hidden');
     const unit = this.settings.weatherUnit;
@@ -101,6 +113,13 @@ export class WeatherWidget {
   }
 
   private async refresh(force = false): Promise<void> {
+    const requestId = ++this.requestId;
+    const requestedCity = this.settings.weatherCity.trim();
+    const stillCurrent = (): boolean =>
+      requestId === this.requestId
+      && this.settings.weatherEnabled
+      && this.settings.weatherCity.trim() === requestedCity;
+
     if (!this.settings.weatherEnabled) {
       this.hide();
       return;
@@ -108,10 +127,11 @@ export class WeatherWidget {
     try {
       if (!force) {
         const stored = await chrome.storage.local.get(WEATHER_CACHE_KEY);
+        if (!stillCurrent()) return;
         const cached = stored[WEATHER_CACHE_KEY] as { city?: string; data?: WeatherData } | undefined;
         if (
           cached?.data &&
-          cached.city === this.settings.weatherCity.trim() &&
+          cached.city === requestedCity &&
           Date.now() - cached.data.fetchedAt < CACHE_TTL
         ) {
           this.show(cached.data);
@@ -119,18 +139,20 @@ export class WeatherWidget {
         }
       }
       const data = await this.fetchWeather();
+      if (!stillCurrent()) return;
       if (!data) {
-        // keep showing whatever was cached, otherwise hide quietly
+        // Only show a fallback for the city that was actually requested.
         const stored = await chrome.storage.local.get(WEATHER_CACHE_KEY);
-        const cached = (stored[WEATHER_CACHE_KEY] as { data?: WeatherData } | undefined)?.data;
-        if (cached) this.show(cached);
+        if (!stillCurrent()) return;
+        const cached = stored[WEATHER_CACHE_KEY] as { city?: string; data?: WeatherData } | undefined;
+        if (cached?.data && cached.city === requestedCity) this.show(cached.data);
         else this.hide();
         return;
       }
-      await chrome.storage.local.set({ [WEATHER_CACHE_KEY]: { city: this.settings.weatherCity.trim(), data } });
-      this.show(data);
+      await chrome.storage.local.set({ [WEATHER_CACHE_KEY]: { city: requestedCity, data } });
+      if (stillCurrent()) this.show(data);
     } catch {
-      this.hide();
+      if (stillCurrent()) this.hide();
     }
   }
 

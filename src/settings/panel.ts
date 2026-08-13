@@ -10,11 +10,6 @@ import { SCENE_LABELS, scenePreviewAccent } from '../scene/scenes';
 import { DEFAULT_SETTINGS } from './schema';
 import { $, el } from '../utils/helpers';
 
-declare const gsap: {
-  to(target: object, vars: Record<string, unknown>): void;
-  fromTo(target: object, from: Record<string, unknown>, to: Record<string, unknown>): void;
-};
-
 export interface PanelHooks {
   onOpen(): void;
   onClose(): void;
@@ -25,23 +20,30 @@ export class SettingsPanel {
   private isOpen = false;
   private panel: HTMLElement;
   private backdrop: HTMLElement;
+  private gear: HTMLButtonElement;
+  private lastFocused: HTMLElement | null = null;
 
   constructor(hooks: PanelHooks) {
     this.hooks = hooks;
     this.panel = el('aside', 'settings-panel');
     this.panel.id = 'settings-panel';
-    this.panel.setAttribute('aria-label', 'HyprTab settings');
+    this.panel.tabIndex = -1;
+    this.panel.setAttribute('role', 'dialog');
+    this.panel.setAttribute('aria-modal', 'true');
+    this.panel.setAttribute('aria-labelledby', 'settings-title');
+    this.panel.setAttribute('aria-hidden', 'true');
     this.backdrop = el('div', 'settings-backdrop');
     this.backdrop.id = 'settings-backdrop';
+    this.backdrop.setAttribute('aria-hidden', 'true');
+    this.gear = $('#settings-gear') as HTMLButtonElement;
+    this.gear.setAttribute('aria-controls', this.panel.id);
+    this.gear.setAttribute('aria-expanded', 'false');
 
     document.body.append(this.backdrop, this.panel);
 
     this.backdrop.addEventListener('click', () => this.close());
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.isOpen) this.close();
-    });
-
-    $('#settings-gear').addEventListener('click', () => this.toggle());
+    document.addEventListener('keydown', (e) => this.onKeydown(e));
+    this.gear.addEventListener('click', () => this.toggle());
 
     this.build();
     settings.subscribe(() => this.sync());
@@ -59,29 +61,59 @@ export class SettingsPanel {
   open(): void {
     if (this.isOpen) return;
     this.isOpen = true;
+    this.lastFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     this.panel.classList.add('open');
     this.backdrop.classList.add('visible');
-    try {
-      gsap.fromTo(this.panel, { xPercent: 108 }, { xPercent: 0, duration: 0.55, ease: 'expo.out' });
-      gsap.fromTo(this.backdrop, { opacity: 0 }, { opacity: 1, duration: 0.3 });
-    } catch { /* no-gsap fallback handled by CSS */ }
+    this.panel.setAttribute('aria-hidden', 'false');
+    this.gear.setAttribute('aria-expanded', 'true');
+    document.body.classList.add('settings-open');
+
+    // A stale horizontal scroll position made the wallpaper cards appear cut
+    // off on later opens. The panel is vertical-only and always starts flush.
+    const scroll = this.panel.querySelector<HTMLElement>('.set-scroll');
+    if (scroll) scroll.scrollLeft = 0;
+    window.requestAnimationFrame(() => this.panel.querySelector<HTMLElement>('.set-close')?.focus());
     this.hooks.onOpen();
   }
 
   close(): void {
     if (!this.isOpen) return;
     this.isOpen = false;
+    this.panel.classList.remove('open');
     this.backdrop.classList.remove('visible');
-    try {
-      gsap.to(this.panel, {
-        xPercent: 108, duration: 0.4, ease: 'power3.in',
-        onComplete: () => this.panel.classList.remove('open'),
-      });
-      gsap.to(this.backdrop, { opacity: 0, duration: 0.35 });
-    } catch {
-      this.panel.classList.remove('open');
-    }
+    this.panel.setAttribute('aria-hidden', 'true');
+    this.gear.setAttribute('aria-expanded', 'false');
+    document.body.classList.remove('settings-open');
     this.hooks.onClose();
+    (this.lastFocused ?? this.gear).focus();
+  }
+
+  private onKeydown(e: KeyboardEvent): void {
+    if (!this.isOpen) return;
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      this.close();
+      return;
+    }
+    if (e.key !== 'Tab') return;
+
+    const focusable = [...this.panel.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+    )].filter((node) => node.offsetParent !== null);
+    if (!focusable.length) {
+      e.preventDefault();
+      this.panel.focus();
+      return;
+    }
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
   }
 
   isVisible(): boolean {
@@ -194,8 +226,17 @@ export class SettingsPanel {
   private build(): void {
     const s = (): Settings => settings.get();
     const header = el('header', 'set-header');
-    header.appendChild(el('h2', 'set-heading', 'HyprTab Settings'));
+    const brand = el('div', 'set-brand');
+    const mark = el('span', 'set-mark', 'H');
+    mark.setAttribute('aria-hidden', 'true');
+    const titles = el('span', 'set-titles');
+    const heading = el('h2', 'set-heading', 'HyprTab Settings');
+    heading.id = 'settings-title';
+    titles.append(el('span', 'set-eyebrow', 'PERSONALIZE'), heading);
+    brand.append(mark, titles);
+    header.appendChild(brand);
     const closeBtn = el('button', 'set-close', '✕');
+    closeBtn.id = 'settings-close';
     closeBtn.type = 'button';
     closeBtn.setAttribute('aria-label', 'Close settings');
     closeBtn.addEventListener('click', () => this.close());

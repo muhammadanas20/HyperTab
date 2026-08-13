@@ -234,11 +234,15 @@ export function drawSpider(ctx: CanvasRenderingContext2D, s: RenderState): void 
   const sz = s.size;
   const pal = s.palette;
   const pose = s.pose;
+  const ink = shade(pal.blue, 0.24);
 
   ctx.save();
   ctx.translate(s.x, s.y);
   ctx.rotate(s.rotation);
-  ctx.scale((s.facing * sz) * (2 - s.squash), sz * s.squash);
+  // Preserve apparent volume during squash-and-stretch without making a
+  // landing comically wide. All geometry remains vector sharp at any DPR.
+  const stretchX = 1 + (1 - s.squash) * 0.72;
+  ctx.scale(s.facing * sz * stretchX, sz * s.squash);
   ctx.globalAlpha = s.alpha;
 
   /* hopping off behind an edge? draw only the visible slice */
@@ -253,169 +257,345 @@ export function drawSpider(ctx: CanvasRenderingContext2D, s: RenderState): void 
   /* ---- breathing + walk-cycle target offsets (procedural life) ---- */
   const breathe = Math.sin(s.breathe * TAU * 0.28) * 0.008;
   let chestOff = breathe;
+  let bodyBob = 0;
   let feet: { L: [number, number]; R: [number, number] } = { L: pose.footL, R: pose.footR };
   let hands: { L: [number, number]; R: [number, number] } = { L: pose.handL, R: pose.handR };
 
   if (s.walkPhase >= 0) {
     const ph = s.walkPhase;
-    const stride = 0.16;
-    const lift = 0.07;
+    const stride = 0.155;
+    const lift = 0.075;
     const stepY = (p: number): number => Math.max(0, Math.sin(p)) * lift;
     feet = {
-      L: [-0.03 + Math.sin(ph) * stride, 0.99 - stepY(ph)],
-      R: [-0.03 + Math.sin(ph + Math.PI) * stride, 0.99 - stepY(ph + Math.PI)],
+      L: [-0.035 + Math.sin(ph) * stride, 0.99 - stepY(ph)],
+      R: [-0.035 + Math.sin(ph + Math.PI) * stride, 0.99 - stepY(ph + Math.PI)],
     };
     hands = {
-      L: [-0.13 + Math.sin(ph + Math.PI) * 0.1, 0.56],
-      R: [0.15 + Math.sin(ph) * 0.1, 0.56],
+      L: [-0.14 + Math.sin(ph + Math.PI) * 0.105, 0.56],
+      R: [0.15 + Math.sin(ph) * 0.105, 0.56],
     };
+    bodyBob = -Math.abs(Math.sin(ph)) * 0.012;
     chestOff += Math.abs(Math.sin(ph * 2)) * 0.008;
   }
 
-  const pelvis: [number, number] = [pose.pelvis[0], pose.pelvis[1]];
-  const chest: [number, number] = [pose.chest[0], pose.chest[1] - chestOff];
+  const pelvis: [number, number] = [pose.pelvis[0], pose.pelvis[1] + bodyBob];
+  const chest: [number, number] = [pose.chest[0], pose.chest[1] - chestOff + bodyBob * 0.72];
   const head: [number, number] = [
-    pose.head[0] + Math.sin(s.headTilt) * 0.03,
-    pose.head[1] - chestOff * 1.4,
+    pose.head[0] + Math.sin(s.headTilt) * 0.025,
+    pose.head[1] - chestOff * 1.25 + bodyBob * 0.48,
   ];
 
-  /* ---- solve limbs ---- */
-  const shoulder: [number, number] = [chest[0] + 0.01, chest[1] + 0.03];
-  const elbowL = twoBone(shoulder[0] - 0.05, shoulder[1], hands.L[0], hands.L[1], UPPER_ARM, FOREARM, -1 + (pose.elbowBend + 1));
-  const elbowR = twoBone(shoulder[0] + 0.05, shoulder[1], hands.R[0], hands.R[1], UPPER_ARM, FOREARM, pose.elbowBend === 1 ? 1 : -1);
-  const kneeL = twoBone(pelvis[0] - 0.04, pelvis[1] + 0.02, feet.L[0], feet.L[1], THIGH, SHIN, pose.kneeBend);
-  const kneeR = twoBone(pelvis[0] + 0.04, pelvis[1] + 0.02, feet.R[0], feet.R[1], THIGH, SHIN, pose.kneeBend);
+  /* ---- solve limbs with mirrored bends for a readable silhouette ---- */
+  const shoulder: [number, number] = [chest[0] + 0.006, chest[1] + 0.036];
+  const shoulderL: [number, number] = [shoulder[0] - 0.075, shoulder[1]];
+  const shoulderR: [number, number] = [shoulder[0] + 0.075, shoulder[1]];
+  const hipL: [number, number] = [pelvis[0] - 0.052, pelvis[1] + 0.012];
+  const hipR: [number, number] = [pelvis[0] + 0.052, pelvis[1] + 0.012];
+  const elbowL = twoBone(shoulderL[0], shoulderL[1], hands.L[0], hands.L[1], UPPER_ARM, FOREARM, -pose.elbowBend);
+  const elbowR = twoBone(shoulderR[0], shoulderR[1], hands.R[0], hands.R[1], UPPER_ARM, FOREARM, pose.elbowBend);
+  const kneeL = twoBone(hipL[0], hipL[1], feet.L[0], feet.L[1], THIGH, SHIN, pose.kneeBend);
+  const kneeR = twoBone(hipR[0], hipR[1], feet.R[0], feet.R[1], THIGH, SHIN, -pose.kneeBend);
 
-  const limbW = 0.052;
-  const far = 'rgba(18,22,48,0.92)';                 // far side in shadow blue
-  const limb = (
-    a: [number, number], j: [number, number], b: [number, number], color: string, w: number,
-  ): void => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = w;
+  type Point = [number, number];
+  const strokePath = (points: Point[], color: string, width: number, shadow = false): void => {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
-    ctx.moveTo(a[0], a[1]);
-    ctx.lineTo(j[0], j[1]);
-    ctx.lineTo(b[0], b[1]);
+    ctx.moveTo(points[0][0], points[0][1]);
+    for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
+    ctx.strokeStyle = shadow ? 'rgba(4,6,14,0.92)' : ink;
+    ctx.lineWidth = width + 0.028;
     ctx.stroke();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.stroke();
+    if (!shadow && s.quality > 0.5) {
+      ctx.globalAlpha = s.alpha * 0.16;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = Math.max(0.007, width * 0.12);
+      ctx.stroke();
+      ctx.globalAlpha = s.alpha;
+    }
   };
 
-  /* far limbs first */
-  limb([pelvis[0] - 0.04, pelvis[1] + 0.02], kneeL, feet.L, far, limbW);
-  limb([shoulder[0] - 0.05, shoulder[1]], elbowL, hands.L, far, limbW * 0.92);
+  const segment = (a: Point, b: Point, color: string, width: number, shadow = false): void =>
+    strokePath([a, b], color, width, shadow);
 
-  /* boots & gloves (far) */
-  const dot = (p: [number, number], r: number, color: string): void => {
-    ctx.fillStyle = color;
+  const between = (a: Point, b: Point, t: number): Point => [lerp(a[0], b[0], t), lerp(a[1], b[1], t)];
+
+  const terminal = (
+    p: Point, rx: number, ry: number, color: string, angle: number, shadow = false,
+  ): void => {
+    ctx.save();
+    ctx.translate(p[0], p[1]);
+    ctx.rotate(angle);
+    ctx.fillStyle = shadow ? shade(color, 0.58) : color;
+    ctx.strokeStyle = shadow ? 'rgba(4,6,14,0.92)' : ink;
+    ctx.lineWidth = 0.018;
     ctx.beginPath();
-    ctx.arc(p[0], p[1], r, 0, TAU);
+    ctx.ellipse(rx * 0.15, 0, rx, ry, 0, 0, TAU);
     ctx.fill();
-  };
-  dot(feet.L, 0.035, shade(pal.red, 0.55));
-  dot(hands.L, 0.034, shade(pal.red, 0.55));
-
-  /* torso — red capsule over a blue hip block */
-  ctx.strokeStyle = pal.blue;
-  ctx.lineWidth = 0.16;
-  ctx.beginPath();
-  ctx.moveTo(pelvis[0], pelvis[1] + 0.01);
-  ctx.lineTo(lerp(pelvis[0], chest[0], 0.42), lerp(pelvis[1], chest[1], 0.42));
-  ctx.stroke();
-  ctx.strokeStyle = pal.red;
-  ctx.lineWidth = 0.17;
-  ctx.beginPath();
-  ctx.moveTo(lerp(pelvis[0], chest[0], 0.3), lerp(pelvis[1], chest[1], 0.3));
-  ctx.lineTo(chest[0], chest[1] + 0.015);
-  ctx.stroke();
-
-  /* chest emblem — tiny geometric spider (original mark) */
-  if (sz > 34) {
-    const ex = lerp(pelvis[0], chest[0], 0.62);
-    const ey = lerp(pelvis[1], chest[1], 0.62);
-    ctx.strokeStyle = pal.trim;
-    ctx.lineWidth = 0.008;
-    ctx.beginPath();
-    ctx.ellipse(ex, ey, 0.012, 0.02, 0, 0, TAU);
     ctx.stroke();
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * TAU + Math.PI / 8;
-      const r1 = 0.016;
-      const r2 = 0.04;
+    if (!shadow && s.quality > 0.5) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 0.006;
       ctx.beginPath();
-      ctx.moveTo(ex + Math.cos(a) * r1, ey + Math.sin(a) * r1);
-      ctx.lineTo(ex + Math.cos(a) * r2, ey + Math.sin(a) * r2 * 1.4);
+      ctx.arc(rx * 0.05, -ry * 0.05, Math.max(rx, ry) * 0.62, Math.PI * 1.08, Math.PI * 1.66);
       ctx.stroke();
     }
+    ctx.restore();
+  };
+
+  const drawLeg = (hip: Point, knee: Point, foot: Point, shadow: boolean): void => {
+    const blue = shadow ? shade(pal.blue, 0.56) : pal.blue;
+    const red = shadow ? shade(pal.red, 0.58) : pal.red;
+    strokePath([hip, knee, foot], blue, 0.073, shadow);
+    const bootTop = between(knee, foot, 0.5);
+    segment(bootTop, foot, red, 0.068, shadow);
+    // A horizontal, tapered boot reads much better than the old circular dot.
+    const footAngle = Math.atan2(foot[1] - knee[1], foot[0] - knee[0]) * 0.12 - 0.08;
+    terminal(foot, 0.052, 0.026, red, footAngle, shadow);
+    if (s.quality > 0.5 && sz > 74) {
+      ctx.save();
+      ctx.strokeStyle = pal.web;
+      ctx.lineWidth = 0.006;
+      ctx.beginPath();
+      ctx.moveTo(lerp(bootTop[0], foot[0], 0.28) - 0.027, lerp(bootTop[1], foot[1], 0.28));
+      ctx.lineTo(lerp(bootTop[0], foot[0], 0.28) + 0.027, lerp(bootTop[1], foot[1], 0.28));
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  const drawArm = (top: Point, elbow: Point, hand: Point, shadow: boolean): void => {
+    const red = shadow ? shade(pal.red, 0.55) : pal.red;
+    strokePath([top, elbow, hand], red, 0.055, shadow);
+    const cuff = between(elbow, hand, 0.62);
+    segment(cuff, hand, red, 0.061, shadow);
+    const angle = Math.atan2(hand[1] - elbow[1], hand[0] - elbow[0]);
+    terminal(hand, 0.039, 0.032, red, angle, shadow);
+  };
+
+  /* far limbs establish depth */
+  drawLeg(hipL, kneeL, feet.L, true);
+  drawArm(shoulderL, elbowL, hands.L, true);
+
+  /* ---- athletic torso: broad shoulders, narrow waist, blue side panels ---- */
+  const torsoDx = pelvis[0] - chest[0];
+  const torsoDy = pelvis[1] - chest[1];
+  const torsoLen = Math.max(0.14, Math.hypot(torsoDx, torsoDy));
+  const torsoAngle = Math.atan2(torsoDy, torsoDx) - Math.PI / 2;
+  ctx.save();
+  ctx.translate(chest[0], chest[1]);
+  ctx.rotate(torsoAngle);
+
+  const torsoPath = (): void => {
+    ctx.beginPath();
+    ctx.moveTo(-0.047, -0.052);
+    ctx.bezierCurveTo(-0.086, -0.052, -0.143, -0.016, -0.148, 0.042);
+    ctx.bezierCurveTo(-0.145, 0.1, -0.108, torsoLen * 0.62, -0.097, torsoLen - 0.008);
+    ctx.bezierCurveTo(-0.066, torsoLen + 0.032, 0.066, torsoLen + 0.032, 0.097, torsoLen - 0.008);
+    ctx.bezierCurveTo(0.108, torsoLen * 0.62, 0.145, 0.1, 0.148, 0.042);
+    ctx.bezierCurveTo(0.143, -0.016, 0.086, -0.052, 0.047, -0.052);
+    ctx.quadraticCurveTo(0, -0.026, -0.047, -0.052);
+    ctx.closePath();
+  };
+
+  torsoPath();
+  ctx.fillStyle = pal.red;
+  ctx.fill();
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = 0.022;
+  ctx.stroke();
+
+  // Classic tapered red centre with deep-blue flank panels.
+  ctx.fillStyle = pal.blue;
+  ctx.beginPath();
+  ctx.moveTo(-0.147, 0.035);
+  ctx.bezierCurveTo(-0.121, 0.074, -0.086, torsoLen * 0.36, -0.055, torsoLen * 0.62);
+  ctx.lineTo(-0.038, torsoLen + 0.018);
+  ctx.lineTo(-0.099, torsoLen - 0.004);
+  ctx.bezierCurveTo(-0.11, torsoLen * 0.6, -0.145, 0.098, -0.147, 0.035);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(0.147, 0.035);
+  ctx.bezierCurveTo(0.121, 0.074, 0.086, torsoLen * 0.36, 0.055, torsoLen * 0.62);
+  ctx.lineTo(0.038, torsoLen + 0.018);
+  ctx.lineTo(0.099, torsoLen - 0.004);
+  ctx.bezierCurveTo(0.11, torsoLen * 0.6, 0.145, 0.098, 0.147, 0.035);
+  ctx.closePath();
+  ctx.fill();
+
+  if (s.quality > 0.5) {
+    // Contour-following suit webbing, restrained so it survives at icon size.
+    ctx.strokeStyle = pal.web;
+    ctx.lineWidth = 0.006;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -0.036);
+    ctx.lineTo(0, torsoLen * 0.72);
+    ctx.moveTo(-0.036, -0.032);
+    ctx.quadraticCurveTo(-0.076, 0.005, -0.106, 0.055);
+    ctx.moveTo(0.036, -0.032);
+    ctx.quadraticCurveTo(0.076, 0.005, 0.106, 0.055);
+    ctx.moveTo(-0.098, 0.058);
+    ctx.quadraticCurveTo(0, 0.09, 0.098, 0.058);
+    ctx.moveTo(-0.076, Math.min(torsoLen * 0.52, 0.125));
+    ctx.quadraticCurveTo(0, Math.min(torsoLen * 0.65, 0.15), 0.076, Math.min(torsoLen * 0.52, 0.125));
+    ctx.stroke();
   }
 
-  /* near limbs */
-  limb([pelvis[0] + 0.04, pelvis[1] + 0.02], kneeR, feet.R, pal.blue, limbW);
-  limb([shoulder[0] + 0.05, shoulder[1]], elbowR, hands.R, pal.blue, limbW * 0.92);
-  dot(feet.R, 0.036, pal.red);
-  dot(hands.R, 0.035, pal.red);
+  /* chest emblem — crisp, legible geometric spider */
+  if (sz > 58) {
+    const ey = Math.min(torsoLen * 0.47, 0.105);
+    ctx.save();
+    ctx.translate(0, ey);
+    ctx.strokeStyle = pal.trim;
+    ctx.fillStyle = pal.trim;
+    ctx.lineWidth = 0.008;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.ellipse(0, -0.008, 0.012, 0.018, 0, 0, TAU);
+    ctx.ellipse(0, 0.018, 0.016, 0.025, 0, 0, TAU);
+    ctx.fill();
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        const y = -0.018 + i * 0.014;
+        const reach = 0.04 + (i === 1 || i === 2 ? 0.012 : 0);
+        ctx.beginPath();
+        ctx.moveTo(side * 0.01, y);
+        ctx.lineTo(side * 0.027, y + (i < 2 ? -0.012 : 0.01));
+        ctx.lineTo(side * reach, y + (i < 2 ? -0.002 : 0.022));
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+  }
 
-  /* head — red mask, subtle web lines, big expressive lenses */
-  const hr = 0.088;
+  // A soft edge-light separates the little figure from dark wallpapers.
+  if (s.quality > 0.5) {
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 0.007;
+    ctx.beginPath();
+    ctx.moveTo(-0.118, 0.005);
+    ctx.quadraticCurveTo(-0.143, 0.06, -0.1, torsoLen * 0.76);
+    ctx.stroke();
+  }
+  ctx.restore(); // torso
+
+  /* neck, then near limbs */
+  const neckEnd: Point = between(chest, head, 0.57);
+  segment([chest[0], chest[1] - 0.018], neckEnd, pal.red, 0.073);
+  drawLeg(hipR, kneeR, feet.R, false);
+  drawArm(shoulderR, elbowR, hands.R, false);
+
+  /* ---- mask: tapered heroic profile, radial webbing, almond lenses ---- */
   ctx.save();
   ctx.translate(head[0], head[1]);
   ctx.rotate(s.headTilt);
+
+  const headPath = (): void => {
+    ctx.beginPath();
+    ctx.moveTo(0, -0.108);
+    ctx.bezierCurveTo(0.064, -0.106, 0.094, -0.065, 0.092, -0.008);
+    ctx.bezierCurveTo(0.091, 0.055, 0.052, 0.099, 0, 0.112);
+    ctx.bezierCurveTo(-0.052, 0.099, -0.091, 0.055, -0.092, -0.008);
+    ctx.bezierCurveTo(-0.094, -0.065, -0.064, -0.106, 0, -0.108);
+    ctx.closePath();
+  };
+
+  headPath();
   ctx.fillStyle = pal.red;
-  ctx.beginPath();
-  ctx.ellipse(0, 0, hr * 0.92, hr, 0, 0, TAU);
   ctx.fill();
 
-  if (sz > 40 && s.quality > 0.5) {
+  // Dim the far temple and brighten the brow for molded, modern depth.
+  ctx.save();
+  headPath();
+  ctx.clip();
+  const maskShade = ctx.createLinearGradient(-0.1, -0.1, 0.11, 0.1);
+  maskShade.addColorStop(0, 'rgba(255,255,255,0.16)');
+  maskShade.addColorStop(0.48, 'rgba(255,255,255,0)');
+  maskShade.addColorStop(1, 'rgba(0,0,0,0.28)');
+  ctx.fillStyle = maskShade;
+  ctx.fillRect(-0.11, -0.12, 0.22, 0.25);
+
+  if (sz > 48 && s.quality > 0.5) {
     ctx.strokeStyle = pal.web;
     ctx.lineWidth = 0.006;
-    for (let i = 0; i < 3; i++) {
+    ctx.lineCap = 'round';
+    const rays: Point[] = [
+      [0, -0.112], [0.059, -0.092], [0.093, -0.03], [0.08, 0.07],
+      [0.035, 0.108], [-0.035, 0.108], [-0.08, 0.07], [-0.093, -0.03], [-0.059, -0.092],
+    ];
+    for (const p of rays) {
       ctx.beginPath();
-      ctx.arc(0, -hr * 1.2, hr * (0.6 + i * 0.45), Math.PI * 0.32, Math.PI * 0.68);
+      ctx.moveTo(0, 0.006);
+      ctx.lineTo(p[0], p[1]);
       ctx.stroke();
     }
-    ctx.beginPath();
-    ctx.moveTo(0, -hr);
-    ctx.lineTo(0, hr * 0.4);
-    ctx.stroke();
-  }
-
-  /* eyes — almond lenses with expression & look direction */
-  const blinkH = Math.max(0.06, 1 - s.blink);
-  const lookX = clamp(s.lookX, -1, 1) * 0.016;
-  const lookY = clamp(s.lookY, -1, 1) * 0.01;
-  const eyePair: Array<[number, number, number]> = [[-0.042, -0.006, -0.12], [0.042, -0.006, 0.12]];
-  for (const [ex, ey, tilt] of eyePair) {
-    let lid = 0;                       // 0 open → upper lid lowered
-    let w = 0.034;
-    let hgt = 0.042 * blinkH;
-    switch (s.expr) {
-      case 'happy': hgt = 0.028 * blinkH; lid = -0.35; break;
-      case 'suspicious': lid = 0.45; w = 0.036; break;
-      case 'sleepy': lid = 0.65; hgt = 0.03; break;
-      case 'wow': w = 0.04; hgt = 0.05 * blinkH; break;
-      case 'neutral': default: break;
+    for (const [rx, ry] of [[0.035, 0.04], [0.064, 0.073], [0.093, 0.105]] as Array<[number, number]>) {
+      ctx.beginPath();
+      ctx.ellipse(0, 0.006, rx, ry, 0, 0, TAU);
+      ctx.stroke();
     }
-    ctx.save();
-    ctx.translate(ex + lookX, ey + lookY);
-    ctx.rotate(tilt + (lid < 0 ? 0.35 : 0) * Math.sign(tilt));
-    // lens white
-    ctx.fillStyle = pal.lens;
+  }
+  ctx.restore();
+
+  headPath();
+  ctx.strokeStyle = ink;
+  ctx.lineWidth = 0.02;
+  ctx.stroke();
+
+  /* expressive almond lenses — fixed to the mask, subtly morphed to look */
+  let eyeHeight = Math.max(0.07, 1 - s.blink);
+  let eyeWidth = 1;
+  let lidShift = 0;
+  switch (s.expr) {
+    case 'happy': eyeHeight *= 0.7; lidShift = -0.005; break;
+    case 'suspicious': eyeHeight *= 0.78; lidShift = 0.009; break;
+    case 'sleepy': eyeHeight = Math.min(eyeHeight, 0.34); lidShift = 0.012; break;
+    case 'wow': eyeHeight = Math.min(1.16, eyeHeight * 1.12); eyeWidth = 1.08; break;
+    case 'neutral': default: break;
+  }
+  const lookNudgeX = clamp(s.lookX, -1, 1) * 0.0035;
+  const lookNudgeY = clamp(s.lookY, -1, 1) * 0.0025;
+
+  for (const side of [-1, 1]) {
+    const innerX = side * (0.014 * eyeWidth) + lookNudgeX;
+    const outerX = side * (0.078 * eyeWidth) + lookNudgeX;
+    const topY = (-0.042 + lidShift + lookNudgeY) * eyeHeight;
+    const bottomY = (0.043 + lidShift + lookNudgeY) * eyeHeight;
     ctx.beginPath();
-    ctx.ellipse(0, 0, w, hgt, 0, 0, TAU);
+    // Pointed inner brow + fuller outer cheek: the unmistakable swept almond
+    // profile reads cleanly even when the whole character is only ~80px tall.
+    ctx.moveTo(innerX, topY);
+    ctx.bezierCurveTo(
+      side * 0.036 * eyeWidth + lookNudgeX, topY * 1.28,
+      side * 0.068 * eyeWidth + lookNudgeX, topY * 1.12,
+      outerX, topY * 0.3,
+    );
+    ctx.bezierCurveTo(
+      side * 0.078 * eyeWidth + lookNudgeX, bottomY * 0.42,
+      side * 0.049 * eyeWidth + lookNudgeX, bottomY * 1.08,
+      innerX, bottomY * 0.76,
+    );
+    ctx.closePath();
+    ctx.fillStyle = pal.lens;
     ctx.fill();
-    // rim
     ctx.strokeStyle = pal.trim;
     ctx.lineWidth = 0.012;
+    ctx.lineJoin = 'round';
     ctx.stroke();
-    // lowered lid for suspicious/sleepy
-    if (lid > 0) {
-      ctx.fillStyle = pal.red;
+
+    if (s.quality > 0.5 && eyeHeight > 0.25) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.52)';
+      ctx.lineWidth = 0.004;
       ctx.beginPath();
-      ctx.ellipse(0, -hgt, w + 0.02, hgt * lid * 2, 0, 0, TAU);
-      ctx.fill();
+      ctx.moveTo(innerX + side * 0.006, topY * 0.75);
+      ctx.quadraticCurveTo(side * 0.047, topY * 1.08, outerX - side * 0.01, topY * 0.56);
+      ctx.stroke();
     }
-    ctx.restore();
   }
   ctx.restore(); // head
   ctx.restore(); // body

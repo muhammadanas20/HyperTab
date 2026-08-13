@@ -69,13 +69,16 @@ async function boot(): Promise<void> {
   if (s.sound && s.rain) sound.startRain();
   // browsers require a gesture before audio — resume softly on first interaction
   const unlock = (): void => {
-    if (s.sound) {
-      sound.setEnabled(true);
-      if (settings.get().rain) sound.startRain();
-    }
+    const current = settings.get();
+    if (!current.sound) return;
+    sound.setEnabled(true);
+    if (current.rain) sound.startRain();
     window.removeEventListener('pointerdown', unlock);
   };
-  window.addEventListener('pointerdown', unlock, { once: true });
+  // Keep listening until sound is actually enabled. With `once: true`, the
+  // first click on the disabled-by-default page consumed the only audio
+  // gesture, so enabling sound later could leave AudioContext suspended.
+  window.addEventListener('pointerdown', unlock);
 
   /* ---------------- speech bubble ---------------- */
   const bubble = $('#bubble');

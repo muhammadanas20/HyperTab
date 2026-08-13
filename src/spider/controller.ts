@@ -112,6 +112,8 @@ export class SpiderController {
   private fleeCooldown = 0;
   private searchHover = false;
   private typingGlow = 0;
+  /** Prevents a late settings-exit animation from marooning him off-screen. */
+  private settingsOpen = false;
 
   /* swing physics */
   private swingPump = 0;
@@ -126,6 +128,7 @@ export class SpiderController {
   private running = false;
   private raf = 0;
   private lastT = 0;
+  private frameDt = 1 / 60;
 
   constructor(canvas: HTMLCanvasElement, hooks: SpiderHooks) {
     this.canvas = canvas;
@@ -143,16 +146,58 @@ export class SpiderController {
   /* ---------------------------------------------------------------- */
 
   resize(): void {
-    const dpr = this.performanceMode ? 1 : Math.min(window.devicePixelRatio || 1, 1.5);
-    this.w = window.innerWidth;
-    this.h = window.innerHeight;
+    const oldW = this.w;
+    const oldH = this.h;
+    const oldGroundY = this.groundY;
+    const dpr = this.performanceMode ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+
+    this.w = Math.max(1, window.innerWidth);
+    this.h = Math.max(1, window.innerHeight);
     this.canvas.width = Math.round(this.w * dpr);
     this.canvas.height = Math.round(this.h * dpr);
     this.canvas.style.width = `${this.w}px`;
     this.canvas.style.height = `${this.h}px`;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Use the actual backing-store ratio after rounding. This keeps the
+    // procedural linework pin-sharp on fractional-DPR/zoomed displays.
+    this.ctx.setTransform(this.canvas.width / this.w, 0, 0, this.canvas.height / this.h, 0, 0);
+    this.ctx.imageSmoothingEnabled = true;
+    this.ctx.imageSmoothingQuality = 'high';
     this.groundY = this.h - 14;
-    this.size = clamp(Math.min(this.w, this.h) * 0.125, 64, 108);
+    this.size = clamp(Math.min(this.w, this.h) * 0.14, 76, 124);
+
+    if (oldW > 0 && oldH > 0) {
+      const sx = this.w / oldW;
+      const sy = this.h / oldH;
+      this.pos.x *= sx;
+      this.pos.y = this.mode === 'ground' ? this.groundY : this.pos.y * sy;
+      this.vel.x *= sx;
+      this.vel.y *= sy;
+
+      this.rope.scale(sx, sy);
+      this.hammockAnchors.ax *= sx;
+      this.hammockAnchors.bx *= sx;
+      if (this.behavior) {
+        this.behavior.tx *= sx;
+        this.behavior.ty *= sy;
+      }
+
+      // A viewport resize must never leave the character permanently beyond
+      // the new edge. Flee/hide/peek intentionally travel off-screen, so only
+      // clamp ordinary active states.
+      if (!this.isBusy('flee', 'hide', 'peek')) {
+        this.pos.x = clamp(this.pos.x, this.margin - this.size * 0.25, this.w - this.margin + this.size * 0.25);
+      }
+      if (this.mode === 'ground' || Math.abs(this.pos.y - oldGroundY) < 2) this.pos.y = this.groundY;
+    }
+
+    if (!Number.isFinite(this.pos.x) || !Number.isFinite(this.pos.y)) {
+      this.rope.detach();
+      this.behavior = null;
+      this.mode = 'ground';
+      this.pos = { x: this.w / 2, y: this.groundY };
+      this.vel = { x: 0, y: 0 };
+      this.alpha = this.enabled ? 1 : 0;
+    }
   }
 
   start(): void {
@@ -180,9 +225,13 @@ export class SpiderController {
     this.enabled = on;
     if (!on) {
       this.fadeAway();
-    } else if (this.mode === 'hidden') {
-      this.spawnEntrance();
+      return;
     }
+
+    // The controller is not started during boot when the saved setting is
+    // disabled. Turning it on later must therefore wake the RAF loop too.
+    if (this.mode === 'hidden') this.spawnEntrance();
+    this.start();
   }
 
   /* ---------------------------------------------------------------- */
@@ -239,14 +288,28 @@ export class SpiderController {
   }
 
   onSettingsOpen(): void {
+    this.settingsOpen = true;
     if (!this.enabled) return;
-    this.fleeOffscreen(1.4);
-    this.hooks.showBubble('skedaddle!', this.pos.x, this.pos.y - this.size, 1200);
+    if (this.mode !== 'hidden') {
+      this.fleeOffscreen(1.4);
+      this.hooks.showBubble('skedaddle!', this.pos.x, this.pos.y - this.size, 1200);
+    }
   }
 
   onSettingsClose(): void {
-    if (!this.enabled || this.mode !== 'hidden' || this.alpha > 0.05) return;
-    this.spawnEntrance();
+    this.settingsOpen = false;
+    if (!this.enabled) return;
+
+    // Closing while the exit dash is still running used to let that stale
+    // dash finish afterwards, leaving the character hidden until refresh.
+    // Cancel the exit atomically and give every close a clean entrance.
+    if (this.behavior?.kind === 'flee' || this.mode === 'hidden') {
+      this.rope.detach();
+      this.behavior = null;
+      this.mode = 'hidden';
+      this.alpha = 0;
+      this.spawnEntrance();
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -293,26 +356,41 @@ export class SpiderController {
   }
 
   private spawnEntrance(): void {
-    if (!this.enabled || this.reducedMotion) {
-      // quiet entrance: step in from the side
+    if (!this.enabled || this.settingsOpen) return;
+
+    if (this.reducedMotion) {
+      // Quiet entrance: step in from the nearest side. Alpha is raised by
+      // update(), so reduced-motion users no longer get an invisible spider.
+      const fromLeft = chance(0.5);
       this.mode = 'ground';
-      this.pos = { x: this.margin + 40, y: this.groundY };
+      this.pos = { x: fromLeft ? this.margin + 18 : this.w - this.margin - 18, y: this.groundY };
+      this.facing = fromLeft ? 1 : -1;
       this.alpha = 0;
-      this.behavior = { kind: 'walk', t: 0, dur: 99, tx: rand(this.w * 0.3, this.w * 0.6), ty: 0, wall: 1, phase: 0, chained: false, released: false, dir: 1 };
+      this.behavior = {
+        kind: 'walk', t: 0, dur: 12,
+        tx: clamp(this.w * rand(0.36, 0.64), this.margin, this.w - this.margin), ty: 0,
+        wall: 1, phase: 0, chained: false, released: false, dir: 1,
+      };
       return;
     }
-    // cinematic entrance: swing in from the top corner
+
+    // Cinematic entrance: always aim across the viewport rather than picking
+    // another anchor in the same corner. The old random corner-on-corner setup
+    // could settle into a near-static pendulum at the top-right on first load.
     const fromLeft = chance(0.5);
     this.mode = 'air';
-    this.pos = { x: fromLeft ? -30 : this.w + 30, y: this.h * 0.22 };
-    this.vel = { x: (fromLeft ? 1 : -1) * rand(380, 520), y: -40 };
+    this.pos = { x: fromLeft ? -this.size * 0.35 : this.w + this.size * 0.35, y: this.h * 0.28 };
+    this.facing = fromLeft ? 1 : -1;
+    this.vel = { x: (fromLeft ? 1 : -1) * rand(420, 560), y: -70 };
     this.alpha = 1;
     this.setPose('airborne', 12);
-    this.startSwing(undefined, true);
+    this.startSwing(fromLeft ? this.w * 0.4 : this.w * 0.6, true);
   }
 
   private fadeAway(): void {
+    this.rope.detach();
     this.behavior = null;
+    this.walkPhase = -1;
     this.mode = 'hidden';
     // alpha eased to 0 in update()
   }
@@ -368,7 +446,9 @@ export class SpiderController {
   }
 
   private startSwing(anchorX?: number, immediate = false): void {
-    const anchor = this.pickAnchor(anchorX);
+    const anchor = immediate && anchorX !== undefined
+      ? { x: clamp(anchorX, 40, this.w - 40), y: rand(8, Math.max(9, Math.min(36, this.h * 0.06))) }
+      : this.pickAnchor(anchorX);
     const attach = (): void => {
       const hand = { x: this.pos.x, y: this.boxTop() + this.size * 0.1 };
       this.rope.attach(anchor.x, anchor.y, hand.x, hand.y, this.vel.x / 60, this.vel.y / 60);
@@ -428,8 +508,16 @@ export class SpiderController {
   }
 
   private startHammock(): void {
-    const span = rand(150, 240);
-    const cx = clamp(this.pos.x + rand(-200, 200), this.w * 0.22 + span, this.w * 0.78 - span);
+    // Keep both anchors inside narrow/mobile viewports. Previously the clamp's
+    // lower bound could exceed its upper bound, producing an off-screen net.
+    const maxSpan = Math.max(64, Math.min(240, (this.w - this.margin * 2) * 0.28));
+    const minSpan = Math.min(150, maxSpan);
+    const span = rand(minSpan, maxSpan);
+    const cx = clamp(
+      this.pos.x + rand(-Math.min(200, this.w * 0.2), Math.min(200, this.w * 0.2)),
+      this.margin + span,
+      this.w - this.margin - span,
+    );
     this.hammockAnchors = { ax: cx - span, bx: cx + span };
     // webs out to both anchors (slung below the top bar, not through it)
     this.fx.shot(this.pos.x, this.boxTop(), this.hammockAnchors.ax, 78);
@@ -517,10 +605,24 @@ export class SpiderController {
   /* ---------------------------------------------------------------- */
 
   private update(dt: number): void {
+    this.frameDt = dt;
     if (!this.enabled) {
       this.alpha = damp(this.alpha, 0, 6, dt);
       return;
     }
+
+    if (!Number.isFinite(this.pos.x) || !Number.isFinite(this.pos.y)
+      || !Number.isFinite(this.vel.x) || !Number.isFinite(this.vel.y)) {
+      this.rope.detach();
+      this.behavior = null;
+      this.mode = 'ground';
+      this.pos = { x: this.w / 2, y: this.groundY };
+      this.vel = { x: 0, y: 0 };
+      this.rotation = 0;
+      this.targetRotation = 0;
+    }
+
+    if (this.mode !== 'hidden') this.alpha = damp(this.alpha, 1, 9, dt);
 
     this.brainTick(dt);
     this.eggTick(dt);
@@ -667,11 +769,13 @@ export class SpiderController {
         const run = b.kind === 'run';
         const speed = (run ? RUN_SPEED : WALK_SPEED) * this.speed;
         const dx = b.tx - this.pos.x;
-        if (Math.abs(dx) < 8) {
+        const step = speed * dt;
+        if (Math.abs(dx) <= Math.max(8, step) || b.t > 14 / Math.max(0.25, this.speed)) {
+          this.pos.x = clamp(b.tx, this.margin, this.w - this.margin);
           return this.endBehavior();
         }
         this.faceToward(b.tx);
-        this.pos.x += Math.sign(dx) * speed * dt;
+        this.pos.x += Math.sign(dx) * Math.min(Math.abs(dx), step);
         const freqScale = run ? 14 : 9;
         this.walkPhase = (this.behavior!.phase += dt * freqScale);
         this.setPose('stand', 12);
@@ -700,8 +804,12 @@ export class SpiderController {
           }
         } else {
           const dx = b.tx - this.pos.x;
-          if (Math.abs(dx) < 10) return this.endBehavior();
-          this.pos.x += Math.sign(dx) * sp * dt;
+          const step = sp * dt;
+          if (Math.abs(dx) <= Math.max(10, step)) {
+            this.pos.x = b.tx;
+            return this.endBehavior();
+          }
+          this.pos.x += Math.sign(dx) * Math.min(Math.abs(dx), step);
         }
         this.walkPhase = (b.phase += dt * 16);
         this.setPose('stand', 12);
@@ -729,17 +837,24 @@ export class SpiderController {
         }
         if (this.mode !== 'swing') break;
         const vel = this.rope.velocity(dt);
-        const overApex = vel.y < 0 && Math.sign(vel.x) === this.facing;
-        if (b.t > b.dur && overApex) {
-          // release!
+        const overApex = vel.y < 0 && Math.sign(vel.x || this.facing) === this.facing;
+        const hardTimeout = b.t > b.dur + 2.4;
+        if ((b.t > b.dur && overApex) || hardTimeout) {
+          // Release at the apex, but always release after a short grace period.
+          // A perfectly settled rope has no next apex and previously remained
+          // attached forever, most visibly at the top-right after refresh.
+          const v = this.rope.velocity(dt);
           this.rope.detach();
           this.mode = 'air';
-          const v = this.rope.velocity(dt);
-          this.vel = { x: v.x * 1.02, y: v.y - 120 };
+          this.vel = {
+            x: clamp(Number.isFinite(v.x) ? v.x * 1.02 : 0, -900, 900),
+            y: clamp(Number.isFinite(v.y) ? v.y - 120 : 80, -1000, 700),
+          };
           this.setPose('airborne', 10);
           this.hooks.sfx('whoosh');
-          // chain into another swing sometimes
-          if (!b.chained && !this.reducedMotion && chance(0.4)) {
+          // Chain into another swing sometimes. A watchdog-triggered release
+          // deliberately lands instead of constructing another stale rope.
+          if (!hardTimeout && !b.chained && !this.reducedMotion && chance(0.4)) {
             b.chained = true;
             b.t = 0;
             b.dur = rand(1.2, 2.2) / this.speed;
@@ -747,7 +862,7 @@ export class SpiderController {
             b.tx = anchor.x; b.ty = anchor.y;
             // brief free-flight then attach (handled above)
             window.setTimeout(() => {
-              if (this.behavior === b && this.mode === 'air') {
+              if (this.behavior === b && this.mode === 'air' && !this.settingsOpen) {
                 const anchor2 = this.pickAnchor(this.pos.x + this.facing * rand(150, 320));
                 b.tx = anchor2.x; b.ty = anchor2.y;
                 this.rope.attach(anchor2.x, anchor2.y, this.pos.x, this.boxTop() + this.size * 0.1, this.vel.x / 60, this.vel.y / 60);
@@ -1021,7 +1136,7 @@ export class SpiderController {
     ctx.clearRect(0, 0, this.w, this.h);
     const quality = this.performanceMode ? 0.5 : 1;
 
-    this.fx.update(1 / 60);
+    this.fx.update(this.frameDt);
     this.fx.render(ctx);
 
     /* webs behind / around the character */
