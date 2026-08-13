@@ -46,6 +46,25 @@ export class SwingRope {
     this.recoil = { ax: this.anchor.x, ay: this.anchor.y, bx: this.x, by: this.y, t: 0 };
   }
 
+  /** Keep an attached/recoiling rope coherent when the viewport changes. */
+  scale(sx: number, sy: number): void {
+    this.anchor.x *= sx;
+    this.anchor.y *= sy;
+    this.x *= sx;
+    this.px *= sx;
+    this.y *= sy;
+    this.py *= sy;
+    const lengthScale = Math.sqrt(Math.abs(sx * sy));
+    this.length *= lengthScale;
+    this.naturalLength *= lengthScale;
+    if (this.recoil) {
+      this.recoil.ax *= sx;
+      this.recoil.ay *= sy;
+      this.recoil.bx *= sx;
+      this.recoil.by *= sy;
+    }
+  }
+
   /** current bob velocity (px/s) */
   velocity(dt: number): Vec {
     return { x: (this.x - this.px) / Math.max(dt, 1e-4), y: (this.y - this.py) / Math.max(dt, 1e-4) };

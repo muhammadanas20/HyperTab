@@ -48,9 +48,12 @@ class SettingsStore {
 
   /** Persist a partial update and notify local subscribers immediately. */
   async update(patch: Partial<Settings>): Promise<void> {
-    const next = { ...this.current, ...patch };
+    // Updates can come from imported JSON as well as trusted controls. Run the
+    // merged object through the same schema used for persisted data so NaN,
+    // invalid colours/URLs and out-of-range values cannot reach live modules.
+    const next = normalizeSettings({ ...this.current, ...patch });
     const changed = new Set<keyof Settings>();
-    (Object.keys(patch) as (keyof Settings)[]).forEach((k) => {
+    (Object.keys(next) as (keyof Settings)[]).forEach((k) => {
       if (JSON.stringify(next[k]) !== JSON.stringify(this.current[k])) changed.add(k);
     });
     this.current = next;

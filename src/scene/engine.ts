@@ -95,8 +95,11 @@ export class WallpaperEngine {
   }
 
   setPerformanceMode(on: boolean): void {
-    if (this.performanceMode !== on) this.resize(); // re-create layers at new DPR
+    if (this.performanceMode === on) return;
+    // Set the flag before resize so resize() chooses the new DPR. The old
+    // order rebuilt at the previous quality and made this toggle a no-op.
     this.performanceMode = on;
+    this.resize();
   }
 
   start(): void {

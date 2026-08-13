@@ -55,8 +55,10 @@ export class ClockWidget {
       month: 'long',
       day: 'numeric',
     });
+    dateEl.toggleAttribute('hidden', !this.settings.showDate);
 
     greetingEl.textContent = this.greeting(now);
+    greetingEl.toggleAttribute('hidden', !this.settings.showGreeting);
   }
 
   destroy(): void {
