@@ -1,0 +1,1 @@
+"use strict";(()=>{window.addEventListener("keydown",e=>{if(e.altKey&&e.shiftKey&&(e.key==="T"||e.code==="KeyT")){e.preventDefault();try{chrome.runtime.sendMessage({type:"hypertab:open"},()=>{chrome.runtime.lastError})}catch{}}});})();

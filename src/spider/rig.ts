@@ -1,0 +1,431 @@
+/**
+ * The Webhead rig — a fully procedural, original stylised spider-hero.
+ *
+ * Nothing is a sprite: the character is described as a handful of
+ * target points (hands / feet / pelvis / chest / head) in a unit
+ * space (character ≈ 1 unit tall, facing +x, y points *down*), limbs
+ * are solved with analytic two-bone IK, and the body is drawn with
+ * capsules + expressive mask lenses. That makes every pose blendable
+ * and every motion smooth at any size.
+ */
+import { clamp, lerp, TAU } from '../utils/helpers';
+
+/* ------------------------------------------------------------------ */
+/* Pose description                                                   */
+/* ------------------------------------------------------------------ */
+
+export interface Pose {
+  /** pelvis/chest/head centres plus hand & foot targets, unit space */
+  pelvis: [number, number];
+  chest: [number, number];
+  head: [number, number];
+  handL: [number, number];
+  handR: [number, number];
+  footL: [number, number];
+  footR: [number, number];
+  /** which way knees/elbows fold: 1 = forwards(+x), -1 = backwards */
+  kneeBend: number;
+  elbowBend: number;
+  /** 0..1 — how "low ready to pounce" the silhouette is (adds crouch sway) */
+  tension?: number;
+}
+
+export type PoseName =
+  | 'stand' | 'crouch' | 'sit' | 'hang' | 'swing' | 'crawl'
+  | 'sleep' | 'hammock' | 'watch' | 'wave' | 'curious'
+  | 'airborne' | 'land' | 'dodge' | 'point';
+
+export const POSES: Record<PoseName, Pose> = {
+  stand: {
+    pelvis: [0, 0.52], chest: [0.02, 0.30], head: [0.06, 0.16],
+    handL: [-0.15, 0.56], handR: [0.17, 0.57],
+    footL: [-0.07, 0.985], footR: [0.11, 0.99],
+    kneeBend: 1, elbowBend: -1,
+  },
+  crouch: {
+    pelvis: [0, 0.66], chest: [0.08, 0.48], head: [0.13, 0.36],
+    handL: [-0.12, 0.62], handR: [0.24, 0.88],          // one fist to the floor
+    footL: [-0.16, 0.985], footR: [0.17, 0.99],
+    kneeBend: 1, elbowBend: -1, tension: 1,
+  },
+  sit: {
+    pelvis: [0, 0.78], chest: [0.0, 0.56], head: [0.04, 0.43],
+    handL: [-0.1, 0.82], handR: [0.13, 0.83],
+    footL: [0.19, 0.965], footR: [0.12, 0.99],          // legs dangle / cross
+    kneeBend: 1, elbowBend: -1,
+  },
+  hang: {   // rendered with a π body-rotation → hangs upside down
+    pelvis: [0, 0.42], chest: [-0.02, 0.24], head: [-0.03, 0.11],
+    handL: [-0.13, 0.42], handR: [0.12, 0.44],
+    footL: [-0.04, 0.03], footR: [0.05, 0.035],          // legs hooked over the web
+    kneeBend: 1, elbowBend: -1,
+  },
+  swing: {  // body arched, both arms up gripping the web
+    pelvis: [0, 0.5], chest: [-0.07, 0.31], head: [-0.06, 0.17],
+    handL: [0.02, 0.03], handR: [0.16, 0.015],
+    footL: [-0.26, 0.72], footR: [-0.1, 0.86],
+    kneeBend: -1, elbowBend: 1,
+  },
+  crawl: {  // spread wall-crawl silhouette (used with ±π/2 rotation)
+    pelvis: [0, 0.5], chest: [0.02, 0.3], head: [0.05, 0.17],
+    handL: [-0.22, 0.3], handR: [0.26, 0.34],
+    footL: [-0.2, 0.86], footR: [0.2, 0.9],
+    kneeBend: -1, elbowBend: 1, tension: 0.6,
+  },
+  sleep: {  // curled up on the floor
+    pelvis: [0, 0.8], chest: [0.1, 0.72], head: [0.17, 0.66],
+    handL: [0.16, 0.86], handR: [0.04, 0.9],
+    footL: [-0.1, 0.99], footR: [0.06, 0.995],
+    kneeBend: 1, elbowBend: -1,
+  },
+  hammock: { // relaxed, hands behind head — drawn while rotated to lie flat
+    pelvis: [0, 0.55], chest: [0.0, 0.3], head: [0.02, 0.16],
+    handL: [0.1, 0.12], handR: [0.2, 0.1],
+    footL: [-0.16, 0.95], footR: [0.1, 0.99],
+    kneeBend: 1, elbowBend: 1,
+  },
+  watch: {  // checks an imaginary watch
+    pelvis: [0, 0.52], chest: [0.02, 0.3], head: [0.08, 0.17],
+    handL: [0.16, 0.26], handR: [0.17, 0.57],           // left wrist raised to face
+    footL: [-0.07, 0.985], footR: [0.11, 0.99],
+    kneeBend: 1, elbowBend: 1,
+  },
+  wave: {
+    pelvis: [0, 0.52], chest: [0.02, 0.3], head: [0.06, 0.16],
+    handL: [-0.15, 0.56], handR: [0.3, 0.12],           // right arm up
+    footL: [-0.07, 0.985], footR: [0.11, 0.99],
+    kneeBend: 1, elbowBend: -1,
+  },
+  curious: { // leaning in, head tilted towards something interesting
+    pelvis: [0, 0.55], chest: [0.08, 0.33], head: [0.14, 0.21],
+    handL: [-0.13, 0.58], handR: [0.16, 0.3],           // hand up at chin
+    footL: [-0.08, 0.985], footR: [0.12, 0.99],
+    kneeBend: 1, elbowBend: 1,
+  },
+  airborne: { // free fall / jump — limbs spread
+    pelvis: [0, 0.5], chest: [0, 0.29], head: [0.04, 0.15],
+    handL: [-0.24, 0.2], handR: [0.26, 0.18],
+    footL: [-0.13, 0.8], footR: [0.13, 0.85],
+    kneeBend: 1, elbowBend: -1,
+  },
+  land: {   // three-point landing
+    pelvis: [0, 0.7], chest: [0.09, 0.52], head: [0.13, 0.4],
+    handL: [-0.14, 0.66], handR: [0.22, 0.94],
+    footL: [-0.18, 0.985], footR: [0.18, 0.99],
+    kneeBend: 1, elbowBend: -1, tension: 1,
+  },
+  dodge: {
+    pelvis: [0, 0.56], chest: [-0.06, 0.34], head: [-0.1, 0.2],
+    handL: [-0.28, 0.4], handR: [0.2, 0.5],
+    footL: [-0.14, 0.985], footR: [0.14, 0.99],
+    kneeBend: 1, elbowBend: -1, tension: 0.8,
+  },
+  point: {  // double-click response: arm out, "thwip"
+    pelvis: [0, 0.52], chest: [0.02, 0.3], head: [0.06, 0.16],
+    handL: [-0.15, 0.56], handR: [0.34, 0.3],
+    footL: [-0.07, 0.985], footR: [0.11, 0.99],
+    kneeBend: 1, elbowBend: -1, tension: 0.4,
+  },
+};
+
+/* ------------------------------------------------------------------ */
+/* Two-bone IK                                                        */
+/* ------------------------------------------------------------------ */
+
+const UPPER_ARM = 0.17;
+const FOREARM = 0.17;
+const THIGH = 0.21;
+const SHIN = 0.22;
+
+function twoBone(
+  ax: number, ay: number,
+  tx: number, ty: number,
+  l1: number, l2: number,
+  bend: number,
+): [number, number] {
+  let dx = tx - ax;
+  let dy = ty - ay;
+  let d = Math.hypot(dx, dy);
+  const min = Math.abs(l1 - l2) + 1e-4;
+  const max = l1 + l2 - 1e-4;
+  d = clamp(d, min, max);
+  // re-target onto the clamped circle so hands/feet never stretch limbs
+  const ux = dx / (Math.hypot(dx, dy) || 1);
+  const uy = dy / (Math.hypot(dx, dy) || 1);
+  dx = ux * d;
+  dy = uy * d;
+  const a1 = Math.acos(clamp((l1 * l1 + d * d - l2 * l2) / (2 * l1 * d), -1, 1));
+  const base = Math.atan2(dy, dx);
+  const ang = base + a1 * bend;
+  return [ax + Math.cos(ang) * l1, ay + Math.sin(ang) * l1];
+}
+
+/* ------------------------------------------------------------------ */
+/* Palettes — every variant is an original stylised colourway         */
+/* ------------------------------------------------------------------ */
+
+export type PaletteId = 'classic' | 'stealth' | 'ghost';
+
+export interface SuitPalette {
+  red: string;      // mask / torso / gloves / boots
+  blue: string;     // limbs / sides
+  web: string;      // web-line detail
+  lens: string;     // eye lenses
+  trim: string;     // emblem / lens rim
+}
+
+export const PALETTES: Record<PaletteId, SuitPalette> = {
+  classic: { red: '#d43a50', blue: '#2e3b8f', web: 'rgba(60,12,20,0.5)', lens: '#eef4ff', trim: '#10131f' },
+  stealth: { red: '#e0243c', blue: '#15151c', web: 'rgba(224,36,60,0.35)', lens: '#ff4d4d', trim: '#050507' },
+  ghost: { red: '#e8e6f2', blue: '#3a3f66', web: 'rgba(90,90,140,0.4)', lens: '#3d2b66', trim: '#ff5ca8' },
+};
+
+/* ------------------------------------------------------------------ */
+/* Render state                                                       */
+/* ------------------------------------------------------------------ */
+
+export type Expression = 'neutral' | 'happy' | 'suspicious' | 'sleepy' | 'wow';
+
+export interface RenderState {
+  x: number;             // screen px (pelvis)
+  y: number;
+  rotation: number;      // whole-body rotation (rad), 0 = upright
+  facing: 1 | -1;
+  size: number;          // character height in px
+  alpha: number;
+  squash: number;        // 1 = normal, <1 squashed (landings)
+  pose: Pose;
+  headTilt: number;      // extra head lean
+  lookX: number;         // where the eyes point (unit, -1..1)
+  lookY: number;
+  blink: number;         // 0 open .. 1 shut
+  expr: Expression;
+  palette: SuitPalette;
+  walkPhase: number;     // >-1 while walking: procedural leg/arm cycle
+  breathe: number;       // breathing phase seconds
+  hidden: 'none' | 'left' | 'right' | 'top'; // peek-from-edge clipping
+  quality: number;
+}
+
+/** Blend two poses point-for-point. */
+export function blendPose(a: Pose, b: Pose, t: number): Pose {
+  const P = (ka: [number, number], kb: [number, number]): [number, number] => [
+    lerp(ka[0], kb[0], t), lerp(ka[1], kb[1], t),
+  ];
+  return {
+    pelvis: P(a.pelvis, b.pelvis),
+    chest: P(a.chest, b.chest),
+    head: P(a.head, b.head),
+    handL: P(a.handL, b.handL),
+    handR: P(a.handR, b.handR),
+    footL: P(a.footL, b.footL),
+    footR: P(a.footR, b.footR),
+    kneeBend: t < 0.5 ? a.kneeBend : b.kneeBend,
+    elbowBend: t < 0.5 ? a.elbowBend : b.elbowBend,
+    tension: lerp(a.tension ?? 0, b.tension ?? 0, t),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* The draw routine                                                   */
+/* ------------------------------------------------------------------ */
+
+export function drawSpider(ctx: CanvasRenderingContext2D, s: RenderState): void {
+  const sz = s.size;
+  const pal = s.palette;
+  const pose = s.pose;
+
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  ctx.rotate(s.rotation);
+  ctx.scale((s.facing * sz) * (2 - s.squash), sz * s.squash);
+  ctx.globalAlpha = s.alpha;
+
+  /* hopping off behind an edge? draw only the visible slice */
+  if (s.hidden !== 'none') {
+    ctx.beginPath();
+    if (s.hidden === 'left') ctx.rect(-0.2, -0.6, 0.75, 2);
+    else if (s.hidden === 'right') ctx.rect(-0.55, -0.6, 0.75, 2);
+    else ctx.rect(-0.6, -0.25, 1.6, 0.7);
+    ctx.clip();
+  }
+
+  /* ---- breathing + walk-cycle target offsets (procedural life) ---- */
+  const breathe = Math.sin(s.breathe * TAU * 0.28) * 0.008;
+  let chestOff = breathe;
+  let feet: { L: [number, number]; R: [number, number] } = { L: pose.footL, R: pose.footR };
+  let hands: { L: [number, number]; R: [number, number] } = { L: pose.handL, R: pose.handR };
+
+  if (s.walkPhase >= 0) {
+    const ph = s.walkPhase;
+    const stride = 0.16;
+    const lift = 0.07;
+    const stepY = (p: number): number => Math.max(0, Math.sin(p)) * lift;
+    feet = {
+      L: [-0.03 + Math.sin(ph) * stride, 0.99 - stepY(ph)],
+      R: [-0.03 + Math.sin(ph + Math.PI) * stride, 0.99 - stepY(ph + Math.PI)],
+    };
+    hands = {
+      L: [-0.13 + Math.sin(ph + Math.PI) * 0.1, 0.56],
+      R: [0.15 + Math.sin(ph) * 0.1, 0.56],
+    };
+    chestOff += Math.abs(Math.sin(ph * 2)) * 0.008;
+  }
+
+  const pelvis: [number, number] = [pose.pelvis[0], pose.pelvis[1]];
+  const chest: [number, number] = [pose.chest[0], pose.chest[1] - chestOff];
+  const head: [number, number] = [
+    pose.head[0] + Math.sin(s.headTilt) * 0.03,
+    pose.head[1] - chestOff * 1.4,
+  ];
+
+  /* ---- solve limbs ---- */
+  const shoulder: [number, number] = [chest[0] + 0.01, chest[1] + 0.03];
+  const elbowL = twoBone(shoulder[0] - 0.05, shoulder[1], hands.L[0], hands.L[1], UPPER_ARM, FOREARM, -1 + (pose.elbowBend + 1));
+  const elbowR = twoBone(shoulder[0] + 0.05, shoulder[1], hands.R[0], hands.R[1], UPPER_ARM, FOREARM, pose.elbowBend === 1 ? 1 : -1);
+  const kneeL = twoBone(pelvis[0] - 0.04, pelvis[1] + 0.02, feet.L[0], feet.L[1], THIGH, SHIN, pose.kneeBend);
+  const kneeR = twoBone(pelvis[0] + 0.04, pelvis[1] + 0.02, feet.R[0], feet.R[1], THIGH, SHIN, pose.kneeBend);
+
+  const limbW = 0.052;
+  const far = 'rgba(18,22,48,0.92)';                 // far side in shadow blue
+  const limb = (
+    a: [number, number], j: [number, number], b: [number, number], color: string, w: number,
+  ): void => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = w;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(a[0], a[1]);
+    ctx.lineTo(j[0], j[1]);
+    ctx.lineTo(b[0], b[1]);
+    ctx.stroke();
+  };
+
+  /* far limbs first */
+  limb([pelvis[0] - 0.04, pelvis[1] + 0.02], kneeL, feet.L, far, limbW);
+  limb([shoulder[0] - 0.05, shoulder[1]], elbowL, hands.L, far, limbW * 0.92);
+
+  /* boots & gloves (far) */
+  const dot = (p: [number, number], r: number, color: string): void => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], r, 0, TAU);
+    ctx.fill();
+  };
+  dot(feet.L, 0.035, shade(pal.red, 0.55));
+  dot(hands.L, 0.034, shade(pal.red, 0.55));
+
+  /* torso — red capsule over a blue hip block */
+  ctx.strokeStyle = pal.blue;
+  ctx.lineWidth = 0.16;
+  ctx.beginPath();
+  ctx.moveTo(pelvis[0], pelvis[1] + 0.01);
+  ctx.lineTo(lerp(pelvis[0], chest[0], 0.42), lerp(pelvis[1], chest[1], 0.42));
+  ctx.stroke();
+  ctx.strokeStyle = pal.red;
+  ctx.lineWidth = 0.17;
+  ctx.beginPath();
+  ctx.moveTo(lerp(pelvis[0], chest[0], 0.3), lerp(pelvis[1], chest[1], 0.3));
+  ctx.lineTo(chest[0], chest[1] + 0.015);
+  ctx.stroke();
+
+  /* chest emblem — tiny geometric spider (original mark) */
+  if (sz > 34) {
+    const ex = lerp(pelvis[0], chest[0], 0.62);
+    const ey = lerp(pelvis[1], chest[1], 0.62);
+    ctx.strokeStyle = pal.trim;
+    ctx.lineWidth = 0.008;
+    ctx.beginPath();
+    ctx.ellipse(ex, ey, 0.012, 0.02, 0, 0, TAU);
+    ctx.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * TAU + Math.PI / 8;
+      const r1 = 0.016;
+      const r2 = 0.04;
+      ctx.beginPath();
+      ctx.moveTo(ex + Math.cos(a) * r1, ey + Math.sin(a) * r1);
+      ctx.lineTo(ex + Math.cos(a) * r2, ey + Math.sin(a) * r2 * 1.4);
+      ctx.stroke();
+    }
+  }
+
+  /* near limbs */
+  limb([pelvis[0] + 0.04, pelvis[1] + 0.02], kneeR, feet.R, pal.blue, limbW);
+  limb([shoulder[0] + 0.05, shoulder[1]], elbowR, hands.R, pal.blue, limbW * 0.92);
+  dot(feet.R, 0.036, pal.red);
+  dot(hands.R, 0.035, pal.red);
+
+  /* head — red mask, subtle web lines, big expressive lenses */
+  const hr = 0.088;
+  ctx.save();
+  ctx.translate(head[0], head[1]);
+  ctx.rotate(s.headTilt);
+  ctx.fillStyle = pal.red;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, hr * 0.92, hr, 0, 0, TAU);
+  ctx.fill();
+
+  if (sz > 40 && s.quality > 0.5) {
+    ctx.strokeStyle = pal.web;
+    ctx.lineWidth = 0.006;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.arc(0, -hr * 1.2, hr * (0.6 + i * 0.45), Math.PI * 0.32, Math.PI * 0.68);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(0, -hr);
+    ctx.lineTo(0, hr * 0.4);
+    ctx.stroke();
+  }
+
+  /* eyes — almond lenses with expression & look direction */
+  const blinkH = Math.max(0.06, 1 - s.blink);
+  const lookX = clamp(s.lookX, -1, 1) * 0.016;
+  const lookY = clamp(s.lookY, -1, 1) * 0.01;
+  const eyePair: Array<[number, number, number]> = [[-0.042, -0.006, -0.12], [0.042, -0.006, 0.12]];
+  for (const [ex, ey, tilt] of eyePair) {
+    let lid = 0;                       // 0 open → upper lid lowered
+    let w = 0.034;
+    let hgt = 0.042 * blinkH;
+    switch (s.expr) {
+      case 'happy': hgt = 0.028 * blinkH; lid = -0.35; break;
+      case 'suspicious': lid = 0.45; w = 0.036; break;
+      case 'sleepy': lid = 0.65; hgt = 0.03; break;
+      case 'wow': w = 0.04; hgt = 0.05 * blinkH; break;
+      case 'neutral': default: break;
+    }
+    ctx.save();
+    ctx.translate(ex + lookX, ey + lookY);
+    ctx.rotate(tilt + (lid < 0 ? 0.35 : 0) * Math.sign(tilt));
+    // lens white
+    ctx.fillStyle = pal.lens;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, w, hgt, 0, 0, TAU);
+    ctx.fill();
+    // rim
+    ctx.strokeStyle = pal.trim;
+    ctx.lineWidth = 0.012;
+    ctx.stroke();
+    // lowered lid for suspicious/sleepy
+    if (lid > 0) {
+      ctx.fillStyle = pal.red;
+      ctx.beginPath();
+      ctx.ellipse(0, -hgt, w + 0.02, hgt * lid * 2, 0, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+  ctx.restore(); // head
+  ctx.restore(); // body
+}
+
+/** Cheap colour shade: multiply rgb by k (for far-side parts). */
+function shade(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * k);
+  const g = Math.round(((n >> 8) & 255) * k);
+  const b = Math.round((n & 255) * k);
+  return `rgb(${r},${g},${b})`;
+}

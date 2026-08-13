@@ -1,0 +1,20 @@
+{
+  "name": "hypertab",
+  "version": "1.0.0",
+  "description": "HyprTab \u2014 a Hyprland-inspired, animated new tab experience with a living web-slinger.",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "zip": "node scripts/pack.mjs",
+    "shots:setup": "npm i --no-save puppeteer"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.287",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0"
+  }
+}
