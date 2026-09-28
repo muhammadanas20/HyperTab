@@ -370,6 +370,10 @@ export class SettingsPanel {
 
     /* ---------- shortcuts ---------- */
     const lSec = this.section('Quick links');
+    lSec.appendChild(this.row('Import bookmarks', this.bound(this.switchCtl(
+      () => s().importBookmarks, (v) => void settings.update({ importBookmarks: v }),
+      'Merge your browser bookmarks into the links bar',
+    ))));
     lSec.appendChild(this.row('Sort by usage', this.bound(this.switchCtl(
       () => s().sortByUsage, (v) => void settings.update({ sortByUsage: v }), 'Toggle sort by usage',
     ))));

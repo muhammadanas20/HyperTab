@@ -97,8 +97,18 @@ like a tiny CG pipeline:
 ### Widgets
 Clock (12/24h, optional seconds), date, greeting (name-aware), weather
 (Open-Meteo, cached 30 min, graceful offline hiding), battery (where
-the Battery API exists), and a quick-links bar fed by Chrome's own
-favicon cache with usage-based self-sorting.
+the Battery API exists), and a quick-links bar that **imports your
+browser bookmarks by default** (toggle in settings) merged with the
+curated tiles, usage-based self-sorting, and a best-available icon
+chain: Chrome's favicon cache → Google's favicon service → a generated
+gradient monogram tile.
+
+### Search, like Chrome's omnibox and then some
+Text queries and URLs navigate as usual; **copied or dragged images are
+accepted by the search bar** (paste anywhere, drop on the bar, or the
+camera button) and Enter uploads them to Google's reverse-image search
+— Lens-style "search with an image", including AI-mode results on
+Google's side.
 
 ### Sounds
 All synthesized live with WebAudio — no audio files: web *thwips*,
@@ -176,12 +186,14 @@ hypertab/
 |---|---|
 | `storage` | settings sync + weather/link caches |
 | `favicon` | crisp site icons in the quick-links bar |
+| `bookmarks` | import your bookmarks into the quick-links bar |
 | `contextMenus` | "Open a HyprTab" right-click shortcut |
 | `host: api.open-meteo.com` (+geocoding) | optional weather; the extension works fully offline without it |
 
 ## Handies
 
 - **`/`** — focus the search bar
+- **Ctrl+V with a screenshot copied** — attach it to the search bar for reverse-image search
 - **Alt+Shift+T** on any page — open a HyprTab
 - **Esc** — close settings
 - DevTools: `window.__spider` — poke him (`__spider.dispatch('hammock')`)

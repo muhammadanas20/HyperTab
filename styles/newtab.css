@@ -341,6 +341,42 @@ body::before {
   opacity: 0.8;
 }
 
+/* attached-image chip + camera action (reverse image search) */
+#search-thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  object-fit: cover;
+  flex: none;
+  border: 1px solid var(--rim);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+
+#search-cam {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--subtext);
+  cursor: pointer;
+  transition: color 0.25s ease, background 0.25s ease, border-color 0.25s ease;
+}
+
+#search-cam:hover,
+#search:focus-within #search-cam {
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--rim-soft);
+}
+
+#search.has-image .search-key,
+#search.has-image #search-glyph { display: none; }
+
 #search-halo {
   position: absolute;
   inset: -30px -60px;

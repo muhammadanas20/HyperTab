@@ -64,6 +64,8 @@ export interface Settings {
   /* ---- links ---- */
   shortcuts: Shortcut[];
   sortByUsage: boolean;
+  /** merge the browser's own bookmarks into the quick-links bar */
+  importBookmarks: boolean;
 }
 
 /** Runtime snapshot passed to the wallpaper renderer each frame. */
