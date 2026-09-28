@@ -52,6 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
 
   shortcuts: DEFAULT_SHORTCUTS.map((s) => ({ ...s })),
   sortByUsage: true,
+  importBookmarks: true,
 };
 
 /** Clamp/validate a settings object loaded from storage against the schema. */
@@ -89,6 +90,7 @@ export function normalizeSettings(raw: unknown): Settings {
   base.performanceMode = bool(r.performanceMode, base.performanceMode);
   base.sound = bool(r.sound, base.sound);
   base.sortByUsage = bool(r.sortByUsage, base.sortByUsage);
+  base.importBookmarks = bool(r.importBookmarks, base.importBookmarks);
 
   base.weatherCity = str(r.weatherCity, base.weatherCity);
   base.userName = str(r.userName, base.userName);

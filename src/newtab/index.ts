@@ -130,8 +130,114 @@ async function boot(): Promise<void> {
   /* ---------------- search ---------------- */
   const searchForm = $('#search') as HTMLFormElement;
   const searchInput = $('#search-input') as HTMLInputElement;
+  const searchThumb = $('#search-thumb') as HTMLImageElement;
+  const searchCam = $('#search-cam') as HTMLButtonElement;
+  const searchFile = $('#search-file') as HTMLInputElement;
+
+  /* ---- image search: paste / drop / pick a picture, search with it ----
+     Mirrors Chrome's "search with an image" (Lens-style reverse search):
+     the picture is uploaded to Google's reverse-image endpoint in a
+     multipart form, exactly like the omnibox camera action. */
+  let pendingImage: File | null = null;
+  let thumbUrl = '';
+
+  const clearImage = (): void => {
+    pendingImage = null;
+    if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+    thumbUrl = '';
+    searchThumb.hidden = true;
+    searchForm.classList.remove('has-image');
+    searchInput.placeholder = 'Search Google, type a URL, or paste an image';
+  };
+
+  const setImage = (file: File): void => {
+    if (!file.type.startsWith('image/')) return;
+    pendingImage = file;
+    if (thumbUrl) URL.revokeObjectURL(thumbUrl);
+    thumbUrl = URL.createObjectURL(file);
+    searchThumb.src = thumbUrl;
+    searchThumb.hidden = false;
+    searchForm.classList.add('has-image');
+    searchInput.placeholder = 'Image attached — Enter searches Google with it';
+    searchInput.value = '';
+    searchInput.focus();
+  };
+
+  const imageFromClipboard = (dt: DataTransfer | null): File | null => {
+    if (!dt) return null;
+    for (const item of Array.from(dt.items ?? [])) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) {
+        const f = item.getAsFile();
+        if (f) return f;
+      }
+    }
+    for (const f of Array.from(dt.files ?? [])) {
+      if (f.type.startsWith('image/')) return f;
+    }
+    return null;
+  };
+
+  searchInput.addEventListener('paste', (e) => {
+    const f = imageFromClipboard((e as ClipboardEvent).clipboardData);
+    if (f) {
+      e.preventDefault();
+      setImage(f);
+    }
+  });
+  /* also catch a copied screenshot pasted anywhere on the fresh tab */
+  window.addEventListener('paste', (e) => {
+    if (document.activeElement === searchInput) return;
+    const f = imageFromClipboard((e as ClipboardEvent).clipboardData);
+    if (f) {
+      e.preventDefault();
+      setImage(f);
+    }
+  });
+  const searchWrapEl = $('#search-wrap');
+  searchWrapEl.addEventListener('dragover', (e) => { e.preventDefault(); });
+  searchWrapEl.addEventListener('drop', (e) => {
+    e.preventDefault();
+    const f = imageFromClipboard((e as DragEvent).dataTransfer);
+    if (f) setImage(f);
+  });
+  searchCam.addEventListener('click', () => searchFile.click());
+  searchFile.addEventListener('change', () => {
+    const f = searchFile.files?.[0];
+    if (f) setImage(f);
+    searchFile.value = '';
+  });
+  searchThumb.addEventListener('click', clearImage);
+  searchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && pendingImage) clearImage();
+  });
+
   searchForm.addEventListener('submit', (e) => {
     e.preventDefault();
+    if (pendingImage) {
+      /* multipart POST straight to Google's reverse-image search */
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = 'https://www.google.com/searchbyimage';
+      form.enctype = 'multipart/form-data';
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.name = 'encoded_image';
+      const dt = new DataTransfer();
+      dt.items.add(pendingImage);
+      fileInput.files = dt.files;
+      const urlField = document.createElement('input');
+      urlField.type = 'hidden';
+      urlField.name = 'image_url';
+      urlField.value = '';
+      const btnField = document.createElement('input');
+      btnField.type = 'hidden';
+      btnField.name = 'btnG';
+      btnField.value = 'Search by image';
+      form.append(fileInput, urlField, btnField);
+      document.body.appendChild(form);
+      form.submit();
+      return;
+    }
     const q = searchInput.value.trim();
     if (!q) return;
     const url = /^(https?:\/\/|[\w-]+(\.[\w-]+)+(\/\S*)?$)/.test(q)
