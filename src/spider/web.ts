@@ -125,16 +125,23 @@ export class SwingRope {
     if (this.attached && this.shootT > 0) {
       const ex = this.anchor.x + (this.x - this.anchor.x) * this.shootT;
       const ey = this.anchor.y + (this.y - this.anchor.y) * this.shootT;
-      const sag = 10 * (1 - this.shootT);
+      /* Silk mechanics (dragline: ~10 GPa initial modulus, yield at ~2–5%
+         strain): a loaded strand is effectively inextensible and thins as
+         tension rises, while a slack strand sags into a catenary. */
+      const cur = Math.hypot(this.x - this.anchor.x, this.y - this.anchor.y);
+      const slack = clamp((this.naturalLength - cur) / this.naturalLength, 0, 1);
+      const strain = clamp((cur - this.naturalLength) / this.naturalLength, 0, 0.3);
+      const sag = (8 + slack * 110) * (1 - this.shootT * 0.5);
+      const core = 1.7 - strain * 2.2;
       // bright core + soft glow
       ctx.strokeStyle = rgba(accent, 0.22);
-      ctx.lineWidth = 3.6;
+      ctx.lineWidth = core + 2.1;
       ctx.beginPath();
       ctx.moveTo(this.anchor.x, this.anchor.y);
       ctx.quadraticCurveTo((this.anchor.x + ex) / 2, (this.anchor.y + ey) / 2 + sag, ex, ey);
       ctx.stroke();
       ctx.strokeStyle = 'rgba(240,244,255,0.95)';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = Math.max(0.8, core);
       ctx.beginPath();
       ctx.moveTo(this.anchor.x, this.anchor.y);
       ctx.quadraticCurveTo((this.anchor.x + ex) / 2, (this.anchor.y + ey) / 2 + sag, ex, ey);

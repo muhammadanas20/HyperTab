@@ -53,9 +53,28 @@ quality down before anything stutters:
 | Particle Field | cursor-reactive plexus — spatial-hashed, O(n) |
 
 ### The webhead
-A fully procedural character (no sprites, no copyrighted assets):
-two-bone IK limbs, blendable poses, expressive mask lenses with
-blinking, looking, squints and sleep-eyes, squash & stretch landings.
+A fully procedural character (no sprites, no copyrighted assets), built
+like a tiny CG pipeline:
+
+- **Anatomy-driven skeleton** (`src/spider/anatomy.ts`) — every joint
+  height, bone length, breadth and muscle girth comes from open
+  anthropometric data (Drillis & Contini via Winter's *Biomechanics and
+  Motor Control*, the classical 8-head figure canon, femur:tibia ≈ 1.27,
+  biacromial ≈ 0.2 H), restyled to a compact 5.4-head athletic canon so
+  the mask lenses stay expressive at desk size.
+- **Procedural gait** — stance/swing foot planting with heel-strike →
+  toe-off ankle pitch, twice-per-stride pelvic bob, speed-proportional
+  trunk lean, contralateral arm swing, heel kick & flight phase when
+  running, and a vestibular-stabilised head.
+- **Mesh + light rendering** — limbs are tapered capsule meshes shaded by
+  stacked light-offset radial gradients (correct around bent elbows),
+  one world-space key light drives form shadows, rim light and the
+  mask's spherical shading; suit webbing is projected as contour rings
+  and radial rays; contact shadows and joint ambient occlusion ground
+  him in the scene.
+- **Acting** — blendable poses, two-bone IK limbs, expressive mask lenses
+  with blinking, looking, squints and sleep-eyes, squash & stretch
+  landings.
 
 - **Moods** (`chill / playful / sleepy / alert`) shift a weighted
   behaviour table every minute or two, and recent actions are
@@ -136,7 +155,8 @@ hypertab/
 │   ├── settings/            # schema (defaults+validation), store, themes, panel UI
 │   ├── scene/               # wallpaper engine + overlays + 7 scenes
 │   ├── widgets/             # clock, weather, battery, links
-│   ├── spider/              # rig (procedural character), web physics,
+│   ├── spider/              # anatomy (researched skeleton + gait model),
+│   │                        #   rig (procedural character), web physics,
 │   │                        #   brain (moods/policy), controller (behaviours+eggs)
 │   ├── audio/sound.ts       # WebAudio synth engine
 │   ├── newtab/ popup/ background/ content/   # entry points
@@ -145,7 +165,8 @@ hypertab/
 │   ├── smoke.mjs            # headless load + liveness trace
 │   ├── beauty.mjs           # behaviour screenshot rig
 │   ├── tour.mjs             # scene tour screenshots
-│   └── posters.mjs          # regenerates assets/wallpapers/*
+│   ├── posters.mjs          # regenerates assets/wallpapers/*
+│   └── preview/rigshot.mjs  # headless character sheet (poses + gait cycles)
 └── docs/                    # README screenshots
 ```
 

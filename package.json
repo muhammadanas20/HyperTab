@@ -10,7 +10,9 @@
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
     "zip": "node scripts/pack.mjs",
-    "shots:setup": "npm i --no-save puppeteer"
+    "shots:setup": "npm i --no-save puppeteer @napi-rs/canvas",
+    "rigshot": "node scripts/preview/rigshot.mjs",
+    "rigshot:closeup": "node scripts/preview/rigshot.mjs .work/closeup.png closeup"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

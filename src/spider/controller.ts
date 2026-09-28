@@ -1161,6 +1161,7 @@ export class SpiderController {
 
     /* the webhead */
     if (this.alpha > 0.01) {
+      const bk = this.behavior?.kind;
       const state: RenderState = {
         x: this.pos.x,
         y: this.boxTop(),
@@ -1177,6 +1178,7 @@ export class SpiderController {
         expr: this.expr,
         palette: PALETTES[this.paletteId],
         walkPhase: this.walkPhase,
+        run: bk === 'run' || bk === 'flee' ? 1 : bk === 'walk' ? 0.12 : bk === 'hide' ? 0.9 : 0,
         breathe: this.breathe,
         hidden: this.hiddenEdge,
         quality,
