@@ -3,13 +3,14 @@
  * renders through @napi-rs/canvas in Node).
  * usage: node scripts/preview/rigshot.mjs [outfile]
  */
-import { createCanvas } from '@napi-rs/canvas';
+import { createCanvas, Path2D } from '@napi-rs/canvas';
 import { build } from 'esbuild';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
+globalThis.Path2D = Path2D;
 const require = createRequire(import.meta.url);
 const here = path.dirname(fileURLToPath(import.meta.url));
 const work = path.join(here, '../../.work');

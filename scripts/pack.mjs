@@ -16,6 +16,7 @@ const INCLUDE = [
   'lib',
   'styles',
   'assets/icons',
+  'assets/links',
   'assets/wallpapers',
 ];
 

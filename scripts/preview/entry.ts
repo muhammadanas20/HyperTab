@@ -35,8 +35,8 @@ export function render(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
     ctx.font = '16px monospace';
     ctx.fillText(name, x - 40, y + 300);
-    if (name === 'hang') draw(x, y + 30, 250, name, { rotation: Math.PI });
-    else if (name === 'hammock') draw(x, y + 150, 250, name, { rotation: Math.PI / 2 });
+    if (name === 'hang') draw(x, y + 270, 250, name, { rotation: Math.PI });
+    else if (name === 'hammock') draw(x + 100, y + 150, 250, name, { rotation: Math.PI / 2 });
     else draw(x, y + 20, 250, name);
   });
 
@@ -62,11 +62,11 @@ export function render(ctx: CanvasRenderingContext2D): void {
   draw(1150, 1620, 200, 'crouch', { facing: -1 });
   /* palettes + degraded quality + squash */
   draw(1350, 1620, 200, 'stand', { palette: PALETTES.stealth });
-  draw(200, 1760, 130, 'swing', { palette: PALETTES.ghost, rotation: 0.5 });
+  draw(240, 1800, 130, 'salute', { palette: PALETTES.ghost, rotation: 0.5 });
   draw(450, 1790, 120, 'stand', { quality: 0.5 });
   draw(650, 1790, 120, 'land', { squash: 0.74 });
   draw(850, 1790, 120, 'stand', { quality: 0.5, walkPhase: 2.2, run: 0.1 });
-  draw(1050, 1790, 120, 'hang', { rotation: Math.PI, quality: 0.5 });
+  draw(1050, 1910, 120, 'hang', { rotation: Math.PI, quality: 0.5 });
 }
 
 /** Big single-figure sheets for detail inspection. */
@@ -84,9 +84,9 @@ export function renderCloseup(ctx: CanvasRenderingContext2D): void {
       hidden: 'none', quality: 1, ...extra,
     } as RenderState);
   };
-  draw(300, 60, 880, 'stand');
-  draw(800, 60, 880, 'stand', { walkPhase: 0.9, run: 0.1 });
-  draw(1250, 60, 880, 'point');
+  draw(230, 65, 810, 'stand');
+  draw(700, 65, 810, 'wave');
+  draw(1090, 65, 810, 'point');
 }
 
 /* browser harness (optional) */

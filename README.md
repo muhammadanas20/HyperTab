@@ -7,12 +7,12 @@ swings on real verlet-physics webs, hangs upside down, naps in a web
 hammock, peeks from corners, dodges your cursor and occasionally shows
 up in a different suit.
 
-![The webhead mid-swing](docs/swing.jpg)
-![Napping in a web hammock](docs/hammock.jpg)
+![Default particle scene and redesigned webhead](docs/particle-default.jpg)
+![New suit, open-palm wave and web-shooting gesture](docs/cinematic-rig.jpg)
 
 Everything is rendered locally — no servers, no tracking, no CDNs at
-runtime. The only network call is the (optional, keyless) weather
-lookup to Open-Meteo.
+runtime. Optional weather uses Open-Meteo; non-curated shortcut icons may fall back
+to Google’s favicon service. The default shortcut icons are bundled locally.
 
 ---
 
@@ -53,28 +53,31 @@ quality down before anything stutters:
 | Particle Field | cursor-reactive plexus — spatial-hashed, O(n) |
 
 ### The webhead
-A fully procedural character (no sprites, no copyrighted assets), built
-like a tiny CG pipeline:
+A completely rebuilt, procedural **movie-inspired illustrated** character.
+It is vector art, not a photorealistic 3D movie model or a pasted reference image.
 
-- **Anatomy-driven skeleton** (`src/spider/anatomy.ts`) — every joint
-  height, bone length, breadth and muscle girth comes from open
-  anthropometric data (Drillis & Contini via Winter's *Biomechanics and
-  Motor Control*, the classical 8-head figure canon, femur:tibia ≈ 1.27,
-  biacromial ≈ 0.2 H), restyled to a compact 5.4-head athletic canon so
-  the mask lenses stay expressive at desk size.
-- **Procedural gait** — stance/swing foot planting with heel-strike →
-  toe-off ankle pitch, twice-per-stride pelvic bob, speed-proportional
-  trunk lean, contralateral arm swing, heel kick & flight phase when
-  running, and a vestibular-stabilised head.
-- **Mesh + light rendering** — limbs are tapered capsule meshes shaded by
-  stacked light-offset radial gradients (correct around bent elbows),
-  one world-space key light drives form shadows, rim light and the
-  mask's spherical shading; suit webbing is projected as contour rings
-  and radial rays; contact shadows and joint ambient occlusion ground
-  him in the scene.
-- **Acting** — blendable poses, two-bone IK limbs, expressive mask lenses
-  with blinking, looking, squints and sleep-eyes, squash & stretch
-  landings.
+- **Athletic silhouette** — a smaller, sculpted mask with angular reflective
+  lenses, broader shoulders, tapered limbs, pectoral/abdominal shading,
+  navy side panels, red gauntlets and boots, and contour-following webbing.
+- **Matrix hierarchy** (`matrix.ts`, `skeleton.ts`) — row-major 3×3 affine
+  multiplication composes body, spine, shoulders, wrists, head and finger
+  branches. Inverse transforms keep cursor aiming and lighting consistent
+  through mirroring, rotation, and landing compression.
+- **Reach-safe IK** — both the joint and endpoint are solved, including
+  coincident/unreachable targets. Bone lengths stay fixed; bend changes
+  project through depth rather than snapping or stretching the forearm.
+- **Articulated gestures** (`poses.ts`) — separate thumb and finger curls,
+  spread and wrist angles blend between relaxed hands, fists, web grips,
+  open-palm waves, salutes and the web-shooting sign. Head turns and lens
+  expressions accompany full-body poses.
+- **Shared attachment geometry** — webs meet the rendered hand during a swing
+  and the ankles during an upside-down hang. Double-click aims first, then
+  emits the strand from the actual wrist/palm location.
+- **Locomotion** — procedural walk/run gait, independent wall-crawl contacts,
+  crouch and three-point landing poses, breathing and exponential pose blends.
+  Reduced-motion mode shows a stationary companion without roaming or gestures.
+- **Local rendering** — cached vector paths and quality-dependent suit details;
+  no external character assets, WebGL dependency, or model downloads.
 
 - **Moods** (`chill / playful / sleepy / alert`) shift a weighted
   behaviour table every minute or two, and recent actions are
@@ -83,7 +86,7 @@ like a tiny CG pipeline:
   momentum carry, rope pumping, release at the apex, chained swings,
   snap-back recoil on release, impact splats.
 - **Idles**: sits, sleeps (with "z z z" bubble), checks an imaginary
-  watch, waves, crouches, perches upside-down, naps in a hand-woven
+  watch, waves, salutes, crouches, perches upside-down, naps in a hand-woven
   web hammock.
 - **Reactions**: eyes follow the cursor; approach fast and he bolts;
   click near him and he dodge-hops; double-click and he points &
@@ -92,16 +95,25 @@ like a tiny CG pipeline:
 - **Easter eggs** (each on long jittered cooldowns): a tiny spider
   crossing the ceiling, a spider emblem drawn out of web silk, hanging
   in front of the search bar, comic quip bubbles, and rare cameo suits
-  (a black/red stealth set, a white/pink ghost set).
+  (a black/red stealth set, a pale/navy ghost set).
 
 ### Widgets
 Clock (12/24h, optional seconds), date, greeting (name-aware), weather
 (Open-Meteo, cached 30 min, graceful offline hiding), battery (where
-the Battery API exists), and a quick-links bar that **imports your
-browser bookmarks by default** (toggle in settings) merged with the
-curated tiles, usage-based self-sorting, and a best-available icon
-chain: Chrome's favicon cache → Google's favicon service → a generated
-gradient monogram tile.
+the Battery API exists), and quick links. The new default is **dark particles**,
+no rain, and the screenshot-order list: GitHub, WhatsApp, Gemini, Arena,
+ChatGPT, LeetCode, Gmail, YouTube, Claude, Neetcode, Spotify.
+**Flex is pending the user's exact URL** and is not linked to a guessed site.
+
+Bookmark import and usage sorting are opt-in, so the curated order stays
+stable. Icons for these defaults are bundled; custom links fall back through
+Chrome's favicon cache → Google's favicon service → a generated monogram.
+
+Existing saved settings and custom links are preserved. To adopt the new
+look/list on an existing installation, open **Settings → Quick links → Apply
+particle preset** and confirm. This changes only appearance/atmosphere and
+shortcuts, not unrelated preferences. **Reset** applies all fresh defaults.
+The redesigned character renderer applies immediately after extension reload.
 
 ### Search, like Chrome's omnibox and then some
 Text queries and URLs navigate as usual; **copied or dragged images are
@@ -165,8 +177,8 @@ hypertab/
 │   ├── settings/            # schema (defaults+validation), store, themes, panel UI
 │   ├── scene/               # wallpaper engine + overlays + 7 scenes
 │   ├── widgets/             # clock, weather, battery, links
-│   ├── spider/              # anatomy (researched skeleton + gait model),
-│   │                        #   rig (procedural character), web physics,
+│   ├── spider/              # matrix math, skeleton/IK, poses, anatomy/gait,
+│   │                        #   rig (vector character), web physics,
 │   │                        #   brain (moods/policy), controller (behaviours+eggs)
 │   ├── audio/sound.ts       # WebAudio synth engine
 │   ├── newtab/ popup/ background/ content/   # entry points
@@ -200,5 +212,29 @@ hypertab/
 
 ## License
 
-MIT. The character is an original procedural creation; no copyrighted
-assets are used anywhere in this project.
+Project code: MIT. The character is procedurally drawn; the supplied reference
+image is not bundled. Shortcut icons include Simple Icons (CC0); attribution
+and trademark notes are in `assets/links/README.md`. No affiliation with the
+referenced character or shortcut brands is implied.
+
+## Development checks
+
+```bash
+npm run typecheck
+npm test                 # dependency-free matrix/IK/pose/controller checks
+npm run build            # updates the checked-in extension bundles
+npm run preview          # web preview at port 4173 (dev-only browser API shim)
+# Optional image/browser checks:
+npm run shots:setup
+npm run rigshot
+npm run rigshot:closeup
+node scripts/preview/check.mjs  # preview server must be running
+```
+
+The unit suite checks 6,144 pose-transition frames, fixed bone lengths,
+coincident/out-of-reach IK, fingers, all 17 behaviors, exact web attachments,
+settings toggles, resizing, and reduced motion. The browser suite also checks
+offline default icons, keyboard search, saved settings, the preset button,
+mobile DPR 2, and rendering all behaviors. Set `PUPPETEER_EXECUTABLE_PATH` to
+use an already installed Chromium. Preview scripts are not included in the
+extension ZIP; they never replace Chrome APIs in an installed extension.

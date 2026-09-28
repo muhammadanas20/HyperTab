@@ -9,24 +9,36 @@ export const LINK_USAGE_KEY = 'hypertab:linkUsage';
 
 export const SETTINGS_VERSION = 1;
 
-/** The default quick-links requested in the spec. */
+/** Screenshot order. Flex is pending the user's exact destination URL. */
 export const DEFAULT_SHORTCUTS: Shortcut[] = [
-  { id: 'github',   title: 'GitHub',   url: 'https://github.com',   enabled: true },
-  { id: 'youtube',  title: 'YouTube',  url: 'https://youtube.com',  enabled: true },
-  { id: 'chatgpt',  title: 'ChatGPT',  url: 'https://chat.openai.com', enabled: true },
-  { id: 'gmail',    title: 'Gmail',    url: 'https://mail.google.com', enabled: true },
+  { id: 'github', title: 'GitHub', url: 'https://github.com', enabled: true },
+  { id: 'whatsapp', title: 'whatsapp', url: 'https://web.whatsapp.com', enabled: true },
+  { id: 'gemini', title: 'Gemini', url: 'https://gemini.google.com', enabled: true },
+  { id: 'arena', title: 'Arena', url: 'https://arena.ai', enabled: true },
+  { id: 'chatgpt', title: 'ChatGPT', url: 'https://chatgpt.com', enabled: true },
   { id: 'leetcode', title: 'LeetCode', url: 'https://leetcode.com', enabled: true },
-  { id: 'reddit',   title: 'Reddit',   url: 'https://reddit.com',   enabled: true },
-  { id: 'spotify',  title: 'Spotify',  url: 'https://open.spotify.com', enabled: true },
+  { id: 'gmail', title: 'Gmail', url: 'https://mail.google.com', enabled: true },
+  { id: 'youtube', title: 'YouTube', url: 'https://youtube.com', enabled: true },
+  { id: 'claude', title: 'Claude', url: 'https://claude.ai', enabled: true },
+  { id: 'neetcode', title: 'Neetcode', url: 'https://neetcode.io', enabled: true },
+  { id: 'spotify', title: 'Spotify', url: 'https://open.spotify.com', enabled: true },
 ];
+
+/** Apply just the requested look/list without wiping unrelated preferences. */
+export function referencePreset(): Partial<Settings> {
+  return { wallpaper: 'particles', theme: 'cyber', accent: '#68bfd3',
+    rain: false, snow: false, particleAmount: 0.7,
+    shortcuts: DEFAULT_SHORTCUTS.map(s => ({ ...s })),
+    sortByUsage: false, importBookmarks: false };
+}
 
 export const DEFAULT_SETTINGS: Settings = {
   version: SETTINGS_VERSION,
 
-  wallpaper: 'cityRain',
+  wallpaper: 'particles',
   animationSpeed: 1,
   particleAmount: 0.7,
-  rain: true,
+  rain: false,
   snow: false,
 
   spiderEnabled: true,
@@ -42,8 +54,8 @@ export const DEFAULT_SETTINGS: Settings = {
   weatherCity: '',
   userName: '',
 
-  theme: 'catppuccin',
-  accent: '#89b4fa',
+  theme: 'cyber',
+  accent: '#68bfd3',
   blur: 14,
 
   performanceMode: false,
@@ -51,8 +63,8 @@ export const DEFAULT_SETTINGS: Settings = {
   volume: 0.5,
 
   shortcuts: DEFAULT_SHORTCUTS.map((s) => ({ ...s })),
-  sortByUsage: true,
-  importBookmarks: true,
+  sortByUsage: false,
+  importBookmarks: false,
 };
 
 /** Clamp/validate a settings object loaded from storage against the schema. */

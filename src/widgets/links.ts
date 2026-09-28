@@ -20,6 +20,13 @@ import { LINK_USAGE_KEY } from '../settings/schema';
 import { $, el } from '../utils/helpers';
 
 const MAX_TILES = 18;
+// Resolve by destination, never by user-editable title/id.
+const LOCAL_ICONS: Record<string, string> = {
+  'github.com':'github', 'web.whatsapp.com':'whatsapp', 'gemini.google.com':'gemini',
+  'arena.ai':'arena', 'chatgpt.com':'chatgpt', 'chat.openai.com':'chatgpt',
+  'leetcode.com':'leetcode', 'mail.google.com':'gmail', 'youtube.com':'youtube',
+  'claude.ai':'claude', 'neetcode.io':'neetcode', 'open.spotify.com':'spotify',
+};
 
 export class LinksWidget {
   private settings: Settings;
@@ -52,10 +59,8 @@ export class LinksWidget {
   private async refreshBookmarks(): Promise<void> {
     const want = this.settings.importBookmarks && !!chrome.bookmarks;
     if (!want) {
-      if (this.bookmarks.length) {
-        this.bookmarks = [];
-        this.render();
-      }
+      this.bookmarks = [];
+      this.render();
       return;
     }
     try {
@@ -176,7 +181,8 @@ export class LinksWidget {
         img.src = this.monogramTile(shortcut.title, shortcut.url);
       }
     });
-    img.src = this.faviconUrl(shortcut.url);
+    const localIcon = LOCAL_ICONS[new URL(shortcut.url).hostname.replace(/^www\./, '')];
+    img.src = localIcon ? chrome.runtime.getURL(`assets/links/${localIcon}.svg`) : this.faviconUrl(shortcut.url);
     icon.appendChild(img);
 
     const label = el('span', 'link-label', shortcut.title);

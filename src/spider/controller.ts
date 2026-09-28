@@ -15,6 +15,9 @@ import {
   PALETTES, POSES, blendPose, drawSpider,
   type Expression, type PaletteId, type Pose, type PoseName, type RenderState,
 } from './rig';
+import { solveSkeleton, bodyMatrix } from './skeleton';
+import { inverse, transform } from './matrix';
+import { HANDS } from './poses';
 import { SwingRope, WebEffects, drawHammock, drawTinySpider, drawWebLogo } from './web';
 import { clamp, damp, lerp, rand, chance } from '../utils/helpers';
 
@@ -77,7 +80,7 @@ export class SpiderController {
   private margin = 26;
 
   /* render state */
-  private size = 84;
+  private size = 116;
   private rotation = 0;
   private targetRotation = 0;
   private squash = 1;
@@ -129,6 +132,7 @@ export class SpiderController {
   private raf = 0;
   private lastT = 0;
   private frameDt = 1 / 60;
+  private thwip: { x: number; y: number; t: number; fired: boolean } | null = null;
 
   constructor(canvas: HTMLCanvasElement, hooks: SpiderHooks) {
     this.canvas = canvas;
@@ -163,7 +167,7 @@ export class SpiderController {
     this.ctx.imageSmoothingEnabled = true;
     this.ctx.imageSmoothingQuality = 'high';
     this.groundY = this.h - 14;
-    this.size = clamp(Math.min(this.w, this.h) * 0.14, 76, 124);
+    this.size = clamp(Math.min(this.w, this.h) * 0.18, 96, 156);
 
     if (oldW > 0 && oldH > 0) {
       const sx = this.w / oldW;
@@ -249,7 +253,7 @@ export class SpiderController {
   }
 
   onPointerDown(x: number, y: number): void {
-    if (!this.enabled || this.mode === 'hidden' || this.alpha < 0.5) return;
+    if (!this.enabled || this.reducedMotion || this.mode === 'hidden' || this.alpha < 0.5) return;
     const d = Math.hypot(x - this.pos.x, y - (this.pos.y - this.size * 0.5));
     if (d < 300 && !this.isBusy('dodge', 'flee')) {
       this.startDodge(x);
@@ -257,21 +261,12 @@ export class SpiderController {
   }
 
   onDoubleClick(x: number, y: number): void {
-    if (!this.enabled || this.mode === 'hidden' || this.alpha < 0.5) return;
+    if (!this.enabled || this.reducedMotion || this.mode === 'hidden' || this.alpha < 0.5) return;
     // face the click, point, and thwip a web at it
     this.faceToward(x);
-    this.setPose('point', 14);
+    this.thwip = { x: clamp(x, 10, this.w - 10), y: clamp(y, 8, this.h - 8), t: 0, fired: false };
     this.expr = 'wow';
-    this.exprHold = 0.7;
-    const hand = this.handWorld();
-    const tx = clamp(x, 10, this.w - 10);
-    this.fx.shot(hand.x, hand.y, tx, Math.max(8, y - 80));
-    this.fx.splat(tx, Math.max(8, y - 80));
-    this.hooks.sfx('thwip');
-    // sometimes he follows the web up for a swing
-    if (!this.reducedMotion && chance(0.45) && this.mode === 'ground') {
-      this.startSwing(tx + rand(-60, 60));
-    }
+    this.exprHold = 0.8;
   }
 
   onSearchHover(hovering: boolean): void {
@@ -290,6 +285,7 @@ export class SpiderController {
   onSettingsOpen(): void {
     this.settingsOpen = true;
     if (!this.enabled) return;
+    if (this.reducedMotion) { this.fadeAway(); this.alpha = 0; return; }
     if (this.mode !== 'hidden') {
       this.fleeOffscreen(1.4);
       this.hooks.showBubble('skedaddle!', this.pos.x, this.pos.y - this.size, 1200);
@@ -336,14 +332,29 @@ export class SpiderController {
 
   /** world position of the "near hand" (used for web lines) */
   private handWorld(): { x: number; y: number } {
-    const localX = 0.09 * this.facing;
-    const localY = 0.05;
-    const cos = Math.cos(this.rotation);
-    const sin = Math.sin(this.rotation);
+    const [x, y] = solveSkeleton(this.renderState()).webHand;
+    return { x, y };
+  }
+
+  /** One render snapshot is used by meshes AND attachment calculations. */
+  private renderState(): RenderState {
+    const bk = this.behavior?.kind;
+    const local = inverse(bodyMatrix({x:0,y:0,rotation:this.rotation,facing:this.facing,size:1,squash:1}));
+    const look = transform(local,[this.lookX,this.lookY]);
     return {
-      x: this.pos.x + (cos * localX - sin * localY) * this.size,
-      y: this.boxTop() + (sin * localX + cos * localY) * this.size,
+      x:this.pos.x, y:this.boxTop(), rotation:this.rotation, facing:this.facing,
+      size:this.size, alpha:this.alpha, squash:this.squash, pose:this.pose,
+      headTilt:this.headTilt, lookX:look[0], lookY:look[1], blink:this.blink,
+      expr:this.expr, palette:PALETTES[this.paletteId], walkPhase:this.thwip ? -1 : this.walkPhase,
+      run:bk==='run'||bk==='flee'?1:bk==='walk'?0.12:0,
+      breathe:this.breathe, hidden:this.hiddenEdge, quality:this.performanceMode?0.5:1,
     };
+  }
+
+  /** Translate the body, never stretch a bone, to meet a world constraint. */
+  private pinAttachment(which: 'webHand' | 'webAnkle', x: number, y: number): void {
+    const p = solveSkeleton(this.renderState())[which];
+    this.pos.x += x-p[0]; this.pos.y += y-p[1];
   }
 
   private endBehavior(): void {
@@ -359,18 +370,13 @@ export class SpiderController {
     if (!this.enabled || this.settingsOpen) return;
 
     if (this.reducedMotion) {
-      // Quiet entrance: step in from the nearest side. Alpha is raised by
-      // update(), so reduced-motion users no longer get an invisible spider.
-      const fromLeft = chance(0.5);
+      // Reduced motion gets a visible, stationary companion, not a walk-in.
       this.mode = 'ground';
-      this.pos = { x: fromLeft ? this.margin + 18 : this.w - this.margin - 18, y: this.groundY };
-      this.facing = fromLeft ? 1 : -1;
-      this.alpha = 0;
-      this.behavior = {
-        kind: 'walk', t: 0, dur: 12,
-        tx: clamp(this.w * rand(0.36, 0.64), this.margin, this.w - this.margin), ty: 0,
-        wall: 1, phase: 0, chained: false, released: false, dir: 1,
-      };
+      this.pos = { x: this.w - Math.max(70,this.size*0.6), y: this.groundY };
+      this.facing = -1;
+      this.alpha = 1;
+      this.pose = POSES.stand;
+      this.behavior = null;
       return;
     }
 
@@ -392,6 +398,7 @@ export class SpiderController {
     this.behavior = null;
     this.walkPhase = -1;
     this.mode = 'hidden';
+    this.thwip = null;
     // alpha eased to 0 in update()
   }
 
@@ -450,7 +457,7 @@ export class SpiderController {
       ? { x: clamp(anchorX, 40, this.w - 40), y: rand(8, Math.max(9, Math.min(36, this.h * 0.06))) }
       : this.pickAnchor(anchorX);
     const attach = (): void => {
-      const hand = { x: this.pos.x, y: this.boxTop() + this.size * 0.1 };
+      const hand = this.handWorld();
       this.rope.attach(anchor.x, anchor.y, hand.x, hand.y, this.vel.x / 60, this.vel.y / 60);
       this.mode = 'swing';
       this.swingPump = 0;
@@ -547,6 +554,8 @@ export class SpiderController {
 
   /** Main dispatcher — turn a policy choice into a running behaviour. */
   private dispatch(kind: BehaviorKind): void {
+    this.poseTweak = null;
+    this.walkPhase = -1;
     switch (kind) {
       case 'walk': return this.startWalk(false);
       case 'run': return this.startWalk(true);
@@ -563,19 +572,21 @@ export class SpiderController {
       case 'sleep':
       case 'watch':
       case 'wave':
+      case 'salute':
       case 'idle': {
         const poseFor: Record<string, PoseName> = {
           sitGround: 'sit', perch: 'sit', crouch: 'crouch', sleep: 'sleep',
-          watch: 'watch', wave: 'wave', idle: 'stand',
+          watch: 'watch', wave: 'wave', salute: 'salute', idle: 'stand',
         };
         const durFor: Record<string, number> = {
           sitGround: rand(4, 9), perch: rand(5, 10), crouch: rand(2.5, 6), sleep: rand(6, 12),
-          watch: 1.9, wave: 2.2, idle: rand(3, 7),
+          watch: 1.9, wave: 2.2, salute: 2.4, idle: rand(3, 7),
         };
         if (kind === 'wave' && !this.reducedMotion) {
           this.poseTweak = (p, t) => ({
             ...p,
-            handR: [0.28 + Math.sin(t * 9) * 0.055, 0.12 + Math.cos(t * 9) * 0.03],
+            handR: [p.handR[0] + Math.sin(t * 7) * 0.025, p.handR[1]],
+            wristR: (p.wristR ?? 0) + Math.sin(t*9)*0.32,
           });
         }
         if (kind === 'watch') {
@@ -622,6 +633,15 @@ export class SpiderController {
       this.targetRotation = 0;
     }
 
+    if (this.reducedMotion) {
+      if (this.mode !== 'hidden') {
+        this.rope.detach(); this.behavior = null; this.mode = 'ground';
+        this.pos.y = this.groundY; this.walkPhase = -1;
+        this.rotation = this.targetRotation = 0; this.squash = 1;
+        this.pose = POSES.stand; this.alpha = 1; this.blink = 0;
+      }
+      return;
+    }
     if (this.mode !== 'hidden') this.alpha = damp(this.alpha, 1, 9, dt);
 
     this.brainTick(dt);
@@ -706,13 +726,8 @@ export class SpiderController {
         const angle = Math.atan2(this.rope.anchor.x - bob.x, -(this.rope.anchor.y - bob.y));
         this.targetRotation = clamp(angle, -1.05, 1.05);
         this.rotation = this.targetRotation;
-        // translate back from the hand-hold point
-        const handLocalX = 0.09 * this.facing;
-        const cos = Math.cos(this.rotation);
-        const sin = Math.sin(this.rotation);
-        this.pos.x = bob.x - (cos * handLocalX - sin * 0.05) * this.size;
-        this.pos.y = bob.y - (sin * handLocalX + cos * 0.05) * this.size + this.size;
         this.faceToward(this.pos.x + vel.x);
+        this.pinAttachment('webHand', bob.x, bob.y);
         /* swinging into the floor? bail out gracefully */
         if (this.pos.y >= this.groundY - this.size * 0.2) {
           this.rope.detach();
@@ -730,11 +745,9 @@ export class SpiderController {
         const sway = Math.sin((this.behavior?.phase ?? 0)) * 0.08 * Math.max(0.3, 1 - (this.behavior?.t ?? 0) * 0.04);
         this.targetRotation = Math.PI + sway;
         const anchor = this.rope.anchor;
-        const len = clamp(Math.hypot(this.pos.x - anchor.x, (this.pos.y - this.size) - anchor.y), this.size * 0.8, this.size * 2.4);
-        const sx = anchor.x + Math.sin(sway * 2.2) * len * 0.12;
-        const sy = anchor.y + len;
-        this.pos.x = damp(this.pos.x, sx, 5, dt);
-        this.pos.y = damp(this.pos.y, sy + this.size * 0.98, 5, dt);
+        const len = clamp(this.rope.length, this.size * 0.85, this.size * 2.0);
+        this.rope.x = anchor.x + Math.sin(sway*2.2)*len*0.12;
+        this.rope.y = anchor.y + len;
         break;
       }
       case 'ground':
@@ -751,7 +764,23 @@ export class SpiderController {
     /* ---------- pose blending ---------- */
     let target = POSES[this.poseName];
     if (this.poseTweak) target = this.poseTweak(target, this.behavior?.t ?? this.breathe);
-    this.pose = blendPose(this.pose, target, Math.min(1, dt * this.poseBlend));
+    if (this.thwip) {
+      this.thwip.t += dt;
+      const local = transform(inverse(bodyMatrix(this.renderState())), [this.thwip.x,this.thwip.y]);
+      // Upper body overlay: keep locomotion/foot contacts when firing in air.
+      const aiming = this.mode === 'ground' ? POSES.point : target;
+      target = { ...aiming, handR: local, curlR: HANDS.thwip, spreadR: 0.9, wristR: -0.10 };
+    }
+    this.pose = blendPose(this.pose, target, 1 - Math.exp(-dt * (this.thwip ? 20 : this.poseBlend)));
+    if (this.mode === 'swing' && this.rope.attached) this.pinAttachment('webHand', this.rope.x, this.rope.y);
+    if (this.mode === 'hang' && this.rope.attached && this.swingPump !== -1) this.pinAttachment('webAnkle', this.rope.x,this.rope.y);
+    if (this.thwip?.t && this.thwip.t > 0.16 && !this.thwip.fired) {
+      const hand = this.handWorld();
+      this.fx.shot(hand.x,hand.y,this.thwip.x,this.thwip.y);
+      this.fx.splat(this.thwip.x,this.thwip.y);
+      this.hooks.sfx('thwip'); this.thwip.fired = true;
+    }
+    if (this.thwip && this.thwip.t > 0.85) this.thwip = null;
   }
 
   private brainTick(dt: number): void {
@@ -827,7 +856,7 @@ export class SpiderController {
         if (!this.rope.attached && this.mode === 'air') {
           // still in the launch hop — attach when we rise a bit
           if (this.vel.y < -60 || this.pos.y < this.groundY - this.size * 1.6) {
-            const hand = { x: this.pos.x, y: this.boxTop() + this.size * 0.1 };
+            const hand = this.handWorld();
             this.rope.attach(b.tx, b.ty, hand.x, hand.y, this.vel.x / 60, this.vel.y / 60);
             this.mode = 'swing';
             this.fx.splat(b.tx, b.ty);
@@ -865,7 +894,8 @@ export class SpiderController {
               if (this.behavior === b && this.mode === 'air' && !this.settingsOpen) {
                 const anchor2 = this.pickAnchor(this.pos.x + this.facing * rand(150, 320));
                 b.tx = anchor2.x; b.ty = anchor2.y;
-                this.rope.attach(anchor2.x, anchor2.y, this.pos.x, this.boxTop() + this.size * 0.1, this.vel.x / 60, this.vel.y / 60);
+                const hand = this.handWorld();
+                this.rope.attach(anchor2.x, anchor2.y, hand.x, hand.y, this.vel.x / 60, this.vel.y / 60);
                 this.mode = 'swing';
                 this.hooks.sfx('thwip');
               }
@@ -910,8 +940,10 @@ export class SpiderController {
         const bx = this.hammockAnchors.bx;
         const midX = (a + bx) / 2 + sway * 8;
         const sag = Math.abs(bx - a) * 0.18;
-        this.pos.x = damp(this.pos.x, midX, 4, dt);
-        this.pos.y = damp(this.pos.y, 78 + sag, 4, dt);
+        const pelvis = solveSkeleton(this.renderState());
+        const contact = transform(pelvis.world,pelvis.pelvis);
+        this.pos.x += (midX-contact[0])*Math.min(1,dt*4);
+        this.pos.y += (78+sag*0.70-contact[1])*Math.min(1,dt*4);
         this.targetRotation = Math.PI / 2 + sway * 0.1;
         if (this.expr !== 'sleepy') this.expr = 'sleepy';
         this.exprHold = 99;
@@ -935,7 +967,14 @@ export class SpiderController {
         const dy = b.ty - this.pos.y;
         if (Math.abs(dy) > 10) {
           this.pos.y += Math.sign(dy) * speed * dt;
-          this.walkPhase = (b.phase += dt * 8);
+          b.phase += dt * 4;
+          this.walkPhase = -1;
+          this.poseTweak = (p) => ({...p,
+            handL:[p.handL[0],p.handL[1]+Math.sin(b.phase)*0.055],
+            handR:[p.handR[0],p.handR[1]-Math.sin(b.phase)*0.055],
+            footL:[p.footL[0],p.footL[1]-Math.sin(b.phase)*0.06],
+            footR:[p.footR[0],p.footR[1]+Math.sin(b.phase)*0.06],
+          });
         } else if (b.t > b.dur * 0.55 || chance(dt * 0.3)) {
           // reached the target height: pause, look around
           this.walkPhase = -1;
@@ -997,6 +1036,7 @@ export class SpiderController {
       case 'sleep':
       case 'watch':
       case 'wave':
+      case 'salute':
       case 'idle': {
         if (b.kind === 'sleep' || b.kind === 'sitGround' || b.kind === 'idle') {
           this.headTiltTarget = b.kind === 'idle' ? Math.sin(b.t * 0.8) * 0.14 : 0;
@@ -1029,7 +1069,7 @@ export class SpiderController {
     this.vel = { x: 0, y: 0 };
     this.targetRotation = 0;
     this.rotation = 0;
-    this.squash = 0.72;
+    this.squash = 0.88;
     this.setPose('land', 18);
     this.hooks.sfx('land');
     // brief "stick the landing" beat, then the brain picks again
@@ -1134,7 +1174,8 @@ export class SpiderController {
   private draw(): void {
     const { ctx } = this;
     ctx.clearRect(0, 0, this.w, this.h);
-    const quality = this.performanceMode ? 0.5 : 1;
+    const state = this.renderState();
+    const rig = solveSkeleton(state);
 
     this.fx.update(this.frameDt);
     this.fx.render(ctx);
@@ -1154,36 +1195,27 @@ export class SpiderController {
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(this.rope.anchor.x, this.rope.anchor.y);
-      ctx.lineTo(this.pos.x, this.boxTop() + this.size * 0.04);
+      ctx.lineTo(...rig.webAnkle);
       ctx.stroke();
       ctx.restore();
     }
 
+    /* Ground contact lives in screen space; never rotates with the hero. */
+    if (this.mode === 'ground' && this.alpha > 0.01) {
+      ctx.save();
+      for (const ankle of [rig.legL.end, rig.legR.end]) {
+        const foot = transform(rig.world,ankle);
+        const gradient = ctx.createRadialGradient(foot[0],this.groundY,0,foot[0],this.groundY,this.size*0.095);
+        gradient.addColorStop(0,`rgba(0,0,0,${this.alpha*0.45})`);
+        gradient.addColorStop(1,'rgba(0,0,0,0)');
+        ctx.fillStyle=gradient;ctx.beginPath();
+        ctx.ellipse(foot[0],this.groundY,this.size*0.095,this.size*0.022,0,0,Math.PI*2);ctx.fill();
+      }
+      ctx.restore();
+    }
     /* the webhead */
     if (this.alpha > 0.01) {
-      const bk = this.behavior?.kind;
-      const state: RenderState = {
-        x: this.pos.x,
-        y: this.boxTop(),
-        rotation: this.rotation,
-        facing: this.facing,
-        size: this.size,
-        alpha: this.alpha,
-        squash: this.squash,
-        pose: this.pose,
-        headTilt: this.headTilt,
-        lookX: this.lookX,
-        lookY: this.lookY,
-        blink: this.blink,
-        expr: this.expr,
-        palette: PALETTES[this.paletteId],
-        walkPhase: this.walkPhase,
-        run: bk === 'run' || bk === 'flee' ? 1 : bk === 'walk' ? 0.12 : bk === 'hide' ? 0.9 : 0,
-        breathe: this.breathe,
-        hidden: this.hiddenEdge,
-        quality,
-      };
-      drawSpider(ctx, state);
+      drawSpider(ctx, state, rig);
     }
 
     /* eggs */
