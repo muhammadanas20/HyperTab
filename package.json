@@ -1,7 +1,7 @@
 {
   "name": "hypertab",
   "version": "1.0.0",
-  "description": "HyprTab \u2014 a Hyprland-inspired, animated new tab experience with a living web-slinger.",
+  "description": "HyprTab — a Hyprland-inspired, animated new tab experience with a living web-slinger.",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -12,7 +12,9 @@
     "zip": "node scripts/pack.mjs",
     "shots:setup": "npm i --no-save puppeteer @napi-rs/canvas",
     "rigshot": "node scripts/preview/rigshot.mjs",
-    "rigshot:closeup": "node scripts/preview/rigshot.mjs .work/closeup.png closeup"
+    "rigshot:closeup": "node scripts/preview/rigshot.mjs .work/closeup.png closeup",
+    "test": "node scripts/test.mjs",
+    "preview": "node scripts/preview/serve.mjs"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",

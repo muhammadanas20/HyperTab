@@ -14,20 +14,20 @@ export type BehaviorKind =
   | 'walk' | 'run' | 'hop' | 'swing' | 'hang'
   | 'sitGround' | 'perch' | 'crouch' | 'crawlWall'
   | 'peek' | 'hide' | 'sleep' | 'hammock'
-  | 'watch' | 'wave' | 'idle';
+  | 'watch' | 'wave' | 'salute' | 'idle';
 
 /** Weights per mood. Higher = more likely. */
 const TABLES: Record<Mood, ReadonlyArray<readonly [BehaviorKind, number]>> = {
   chill: [
     ['walk', 26], ['idle', 12], ['sitGround', 12], ['hang', 12],
     ['crouch', 8], ['watch', 8], ['swing', 10], ['peek', 6],
-    ['hammock', 6], ['crawlWall', 8], ['wave', 4], ['perch', 6],
+    ['hammock', 6], ['crawlWall', 8], ['salute', 4], ['wave', 4], ['perch', 6],
     ['hide', 3], ['hop', 6],
   ],
   playful: [
     ['swing', 26], ['run', 18], ['hop', 16], ['crawlWall', 10],
     ['hang', 8], ['peek', 8], ['hide', 7], ['walk', 8],
-    ['perch', 6], ['wave', 5], ['crouch', 4],
+    ['perch', 6], ['salute', 5], ['wave', 5], ['crouch', 4],
   ],
   sleepy: [
     ['idle', 18], ['sleep', 20], ['hammock', 18], ['sitGround', 14],

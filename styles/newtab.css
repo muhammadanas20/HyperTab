@@ -94,7 +94,7 @@ body::before {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  max-width: 44vw;
+  max-width: min(72vw, 850px);
 }
 
 .link-tile {

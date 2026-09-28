@@ -7,7 +7,7 @@ import type { SceneId, Settings, ThemeId } from '../types';
 import { settings } from './store';
 import { PALETTES } from './themes';
 import { SCENE_LABELS, scenePreviewAccent } from '../scene/scenes';
-import { DEFAULT_SETTINGS } from './schema';
+import { DEFAULT_SETTINGS, referencePreset } from './schema';
 import { $, el } from '../utils/helpers';
 
 export interface PanelHooks {
@@ -273,7 +273,7 @@ export class SettingsPanel {
     scroll.appendChild(wallSec);
 
     /* ---------- spider ---------- */
-    const spSec = this.section('The Webhead', 'He has moods. He roams. He means no harm.');
+    const spSec = this.section('The Webhead', 'Cinematic suit · articulated hands · matrix-driven movement.');
     spSec.appendChild(this.row('Enabled', this.bound(this.switchCtl(
       () => s().spiderEnabled, (v) => void settings.update({ spiderEnabled: v }), 'Toggle the spider',
     ))));
@@ -370,6 +370,16 @@ export class SettingsPanel {
 
     /* ---------- shortcuts ---------- */
     const lSec = this.section('Quick links');
+    const presetBtn = el('button', 'btn', 'Apply particle preset');
+    presetBtn.type = 'button';
+    presetBtn.title = 'Use the dark particle look and reference shortcut list; keeps your other settings';
+    presetBtn.addEventListener('click', () => {
+      if (window.confirm('Replace your shortcut list and appearance with the particle preset? Other preferences will stay unchanged.')) {
+        void settings.update(referencePreset());
+      }
+    });
+    lSec.appendChild(this.row('Reference defaults', presetBtn, 'Dark particles + the curated shortcut list'));
+
     lSec.appendChild(this.row('Import bookmarks', this.bound(this.switchCtl(
       () => s().importBookmarks, (v) => void settings.update({ importBookmarks: v }),
       'Merge your browser bookmarks into the links bar',
